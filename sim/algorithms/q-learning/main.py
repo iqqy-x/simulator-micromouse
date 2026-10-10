@@ -110,6 +110,10 @@ def setColor(x, y, color):
     _command(["setColor", x, y, color])
 
 
+def setWall(x, y, direction):
+    _command(["setWall", x, y, direction])
+
+
 def clearAllColor():
     _command(["clearAllColor"])
 
@@ -196,7 +200,21 @@ def sense(x, y, heading, kmap):
     ]
     for abs_dir, sensor_fn in checks:
         if kmap.get(x, y, abs_dir) is None:
-            kmap.set(x, y, abs_dir, sensor_fn())
+            is_wall = sensor_fn()
+            kmap.set(x, y, abs_dir, is_wall)
+            if is_wall:
+                draw_wall(kmap, x, y, abs_dir)
+
+
+def draw_wall(kmap, x, y, d):
+    """Gambar dinding di simulator di kedua sisinya (sel ini dan tetangganya).
+    Hanya dipanggil sekali per dinding karena sense() cuma membacanya saat
+    pertama kali diketahui."""
+    setWall(x, y, d.lower())
+    dx, dy = DELTA[d]
+    nx, ny = x + dx, y + dy
+    if 0 <= nx < kmap.w and 0 <= ny < kmap.h:
+        setWall(nx, ny, OPPOSITE[d].lower())
 
 
 def turn_to_heading(current_heading, target_heading):
@@ -411,13 +429,15 @@ def navigate_home(kmap, x, y, heading):
     return heading
 
 
-def color_final_path(path):
+def color_path(path):
+    """Warnai jalur (dari start) di simulator: start biru, jalur hijau.
+    Dipanggil hanya saat jalur terbaik baru ditemukan, dan untuk run akhir."""
     clearAllColor()
     x, y = 0, 0
-    setColor(x, y, "b")  # start = biru
+    setColor(x, y, "b")
     for d in path:
         x, y = x + DELTA[d][0], y + DELTA[d][1]
-        setColor(x, y, "g")  # jalur akhir = hijau
+        setColor(x, y, "g")
 
 
 # ============================================================
@@ -497,6 +517,7 @@ def main():
             )
             if success and (best_len is None or len(path) < best_len):
                 best_len = len(path)
+                color_path(path)
 
             log_writer.writerow([ep, len(path), int(success), reward, epsilon, best_len or ""])
             log_f.flush()
@@ -520,7 +541,7 @@ def main():
         )
         if success:
             eprint(f"Run akhir sampai tujuan dalam {len(path)} langkah.")
-            color_final_path(path)
+            color_path(path)
         else:
             eprint("Run akhir belum sampai tujuan — coba naikkan NUM_EPISODES.")
     except MouseCrashedError:
