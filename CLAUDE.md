@@ -126,9 +126,11 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   `try/except MouseCrashedError` supaya kalau masih ada crash (mis. maze
   lain yang ukurannya SAMA tapi tata letaknya beda), programnya berhenti
   dengan pesan jelas alih-alih traceback mentah.
-- Belum menggambar dinding yang baru disensor ke tampilan `mms` (tidak
-  panggil `setWall`, beda dari flood-fill-c yang menggambar tiap step) —
-  kosmetik saja, tidak memengaruhi korektnes algoritma.
+- `sense()` sekarang juga memanggil `setWall()` (lewat `draw_wall()`) begitu
+  sebuah dinding baru pertama kali diketahui, digambar di kedua sisinya
+  (sel ini dan tetangganya) — dulu tidak digambar sama sekali (cuma
+  mewarnai tiap sel yang dikunjungi, tidak menampilkan peta dinding).
+  Kosmetik saja, tidak memengaruhi korektnes algoritma.
 - **Bug nyata lain yang sudah diperbaiki (ditemukan dari pengamatan user:
   robot "jerking" di dua sel yang sama sampai kehabisan langkah, pada
   epsilon rendah/mendekati greedy)**: reward shaping dulu pakai jarak
@@ -145,6 +147,17 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   `Phi(s) = -jarak_ke_goal(s)` -- sebelumnya rumusnya `Phi(s) - Phi(s')`
   tanpa faktor `gamma`, jadi bukan potential-based shaping yang benar-benar
   sah (yang menjamin kebijakan optimal tidak berubah apapun potensinya).
+- **Logging + tools analisis (offline, tidak perlu `mms` jalan)**:
+  `main.py` sekarang menulis `episode_log.csv` (kolom: episode, steps,
+  success, reward, epsilon, best_len), ditimpa tiap run dan di-flush tiap
+  episode supaya tetap kebaca walau training terhenti di tengah. Dua
+  script baru mengonsumsi file ini + `qtable_state.pkl`:
+  - `plot_training.py` — grafik reward & steps per episode (plus moving
+    average dan kurva best-path-so-far), disimpan ke `training_plot.png`.
+  - `view_qtable.py` — ringkasan + grid panah ASCII dari kebijakan yang
+    sudah dipelajari, plus ekspor Q-table/peta dinding mentah ke CSV/JSON.
+  Semua file hasil (`episode_log.csv`, `training_plot.png`,
+  `qtable_export.csv/json`) sudah di-gitignore.
 
 ## astar-c — catatan implementasi
 
