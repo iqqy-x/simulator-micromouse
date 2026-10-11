@@ -89,75 +89,40 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
 ## q-learning — catatan implementasi
 
 - Eksperimen, bukan algoritma aktif kompetisi (itu tetap flood-fill-c).
-  Python dipilih (bukan C) karena tujuannya khusus dicoba di simulator `mms`,
-  bukan untuk di-porting ke firmware STM32.
-- State = posisi sel (x,y) saja; heading TIDAK masuk Q-table (aksi = arah
-  mutlak N/E/S/W, robot berbelok otomatis sebelum maju) — state space jadi
-  W×H×4 nilai-Q saja, bukan W×H×4×4.
-- Training jalan lewat gerakan fisik sungguhan di `mms` (bukan simulasi
-  virtual di memori): tiap episode robot benar-benar jalan dari start, lalu
-  dipandu BFS (di atas peta yang sudah diketahui) untuk kembali ke start —
-  jadi tidak perlu klik tombol Reset simulator berulang-ulang untuk setiap
-  episode training (`wasReset()`/`ackReset()` cuma dipakai di akhir, untuk
-  menunggu user reset manual kalau mau mengulang seluruh proses).
-- Q-table + peta dinding yang sudah diketahui disimpan ke `qtable_state.pkl`
-  (gitignored) supaya training lanjut dari sesi sebelumnya, bukan mulai dari
-  nol tiap kali simulator dibuka ulang.
-- **Bug nyata yang sudah diperbaiki (ditemukan dari crash log user, run
-  pertama, maze 16x16, TANPA `qtable_state.pkl` lama sama sekali — jadi
-  bukan soal state lama)**: `navigate_home()` dulu menghitung SATU rencana
-  BFS di awal lalu mengeksekusi semua langkahnya membuta, tanpa sensor ulang
-  di tiap langkah — beda dari `run_episode()` (dan dari `flood-fill-c`) yang
-  selalu sensor+replan tiap langkah. Itu satu-satunya tempat yang melanggar
-  invariant "hanya bergerak ke arah yang baru saja dikonfirmasi terbuka",
-  dan bisa memicu `MouseCrashedError` yang sebelumnya tidak pernah ditangani
-  (proses mati dengan traceback mentah). Sekarang `navigate_home()`
-  sense+BFS ulang di SETIAP langkah, sama seperti `flood-fill-c`.
-- **Bug terkait yang juga diperbaiki**: `run_episode()` dulu selalu asumsi
-  mouse mulai menghadap `"N"`, padahal tidak ada reset sungguhan di `mms`
-  antar episode (cuma jalan fisik pulang lewat `navigate_home()`) — kalau
-  robot berhenti menghadap arah lain, asumsi `"N"` di episode berikutnya
-  bikin heading yang dilacak Python desync dari heading asli robot, merusak
-  semua pemetaan sensor depan/kanan/kiri/belakang→arah mutlak sesudahnya.
-  Sekarang heading asli diteruskan (threaded) lewat seluruh loop di `main()`.
-- **Proteksi tambahan (defense in depth, bukan fix utama)**: `qtable_state.pkl`
-  dari maze lain yang KEBETULAN beda ukuran (lebar/tinggi) otomatis dibuang
-  saat dimuat (`load_state()`), dan seluruh training/run akhir dibungkus
-  `try/except MouseCrashedError` supaya kalau masih ada crash (mis. maze
-  lain yang ukurannya SAMA tapi tata letaknya beda), programnya berhenti
-  dengan pesan jelas alih-alih traceback mentah.
-- `sense()` sekarang juga memanggil `setWall()` (lewat `draw_wall()`) begitu
-  sebuah dinding baru pertama kali diketahui, digambar di kedua sisinya
-  (sel ini dan tetangganya) — dulu tidak digambar sama sekali (cuma
-  mewarnai tiap sel yang dikunjungi, tidak menampilkan peta dinding).
-  Kosmetik saja, tidak memengaruhi korektnes algoritma.
-- **Bug nyata lain yang sudah diperbaiki (ditemukan dari pengamatan user:
-  robot "jerking" di dua sel yang sama sampai kehabisan langkah, pada
-  epsilon rendah/mendekati greedy)**: reward shaping dulu pakai jarak
-  **Manhattan** (garis lurus) ke goal, yang buta terhadap dinding. Sel jalan
-  buntu bisa Manhattan-nya sangat dekat ke goal padahal jalur asli (lewat
-  dinding yang diketahui) jauh memutar -- agen jadi mengira masuk ke jalan
-  buntu itu langkah bagus, lalu terjebak maju-mundur di situ karena
-  satu-satunya jalan keluar ya balik lagi. Sekarang shaping pakai
-  `bfs_distances_to_goal()` (BFS multi-source dari goal, sama persis dengan
-  ide `distances[][]` di flood-fill-c, tapi dihitung dari peta yang sudah
-  diketahui robot) -- tidak bisa lagi salah kira jalan buntu itu dekat.
-  Rumusnya juga dibetulkan jadi bentuk potential-based shaping yang benar
-  (Ng, Harada, Russell 1999): `F(s->s') = gamma*Phi(s') - Phi(s)` dengan
-  `Phi(s) = -jarak_ke_goal(s)` -- sebelumnya rumusnya `Phi(s) - Phi(s')`
-  tanpa faktor `gamma`, jadi bukan potential-based shaping yang benar-benar
-  sah (yang menjamin kebijakan optimal tidak berubah apapun potensinya).
-- **Logging + tools analisis (offline, tidak perlu `mms` jalan)**:
-  `main.py` sekarang menulis `episode_log.csv` (kolom: episode, steps,
-  success, reward, epsilon, best_len), ditimpa tiap run dan di-flush tiap
-  episode supaya tetap kebaca walau training terhenti di tengah. Dua
-  script baru mengonsumsi file ini + `qtable_state.pkl`:
-  - `plot_training.py` — grafik reward & steps per episode (plus moving
-    average dan kurva best-path-so-far), disimpan ke `training_plot.png`.
-  - `view_qtable.py` — ringkasan + grid panah ASCII dari kebijakan yang
-    sudah dipelajari, plus ekspor Q-table/peta dinding mentah ke CSV/JSON.
-  Semua file hasil (`episode_log.csv`, `training_plot.png`,
-  `qtable_export.csv/json`) sudah di-gitignore.
+  Python dipilih (bukan C) karena khusus untuk dicoba di simulator `mms`.
+  Target maze: 8x8 (goal 2x2 di tengah). Sengaja dibuat **Q-learning standar
+  yang sederhana**: tanpa reward shaping, tanpa BFS, tanpa peta internal.
+- State = (x,y); aksi = 4 arah mutlak N/E/S/W (robot berbelok otomatis).
+  Hanya arah tanpa dinding (dari sensor) yang boleh dipilih, karena di `mms`
+  menabrak = crash. `max Q(s',a')` juga dihitung hanya atas arah terbuka.
+- Reward: -1 per langkah, +100 di goal. ε-greedy, ε turun x0.99 per episode.
+  Hyperparameter ada di konstanta atas `main.py` (NUM_EPISODES=500 sebagai
+  batas atas, ALPHA=0.3, GAMMA=0.95).
+- Early stopping: training berhenti kalau `best_len` (langkah episode sukses
+  terpendek) tak membaik selama PATIENCE=50 episode berturut-turut (dihitung
+  setelah pertama kali sampai goal); kalau tidak, berhenti di NUM_EPISODES.
+  Setelah itu: simpan Q-table, satu run greedy, lalu diam menunggu Reset.
+- Antar episode robot pulang dengan membalik jalurnya sendiri (loop dibuang
+  lewat `trail_pos`/`trail_act`) -- aman tanpa sensor, tidak perlu klik Reset.
+  Heading diteruskan antar episode karena tidak ada reset sungguhan.
+- Tidak ada persistensi antar sesi: Q-table mulai dari nol tiap run (menghindari
+  state dari maze lain). `qtable_state.pkl` tetap ditulis di akhir training
+  hanya untuk `view_qtable.py`; `episode_log.csv` untuk `plot_training.py`.
+- Diuji dengan simulator tiruan (maze acak 8x8, dan `main()` utuh di
+  `training/practice-8x8-a.txt`): tidak ada crash, pulang ke start selalu
+  pas. Dengan early stopping (patience 50) training berhenti di episode
+  ~80-200; run greedy akhir = jalur optimal BFS (22 langkah) di 11 dari 12
+  seed, 1 seed berakhir 24 langkah (Q belum konvergen penuh saat berhenti).
+  Belum diuji langsung di `mms` asli.
+- Maze 9x9 yang cocok: `training/practice-8x8-a.txt` (namanya "8x8" tapi area
+  bermainnya 9x9 di pojok kiri-bawah grid 16x16; goal `mms` 2x2 di (7..8,7..8)
+  = pojok kanan-atas area itu).
+- Riwayat: versi lama punya KnownMap + shaping BFS + `navigate_home()` BFS;
+  dibuang karena shaping dari peta yang berubah melanggar syarat potential-based
+  shaping dan terlalu kompleks untuk tujuan eksperimen ini.
+- Tools analisis offline: `plot_training.py` (grafik reward/steps ->
+  `training_plot.png`) dan `view_qtable.py` (grid panah kebijakan + ekspor
+  CSV/JSON). Semua file hasil di-gitignore.
 
 ## astar-c — catatan implementasi
 
