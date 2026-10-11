@@ -37,7 +37,7 @@ micromouse/
 Semua folder di atas (termasuk `sim/mms-app`, `sim/mms-src`,
 `sim/mazes/mazefiles`) **di-track di git**, bukan di-gitignore — user minta
 repo GitHub-nya self-contained. `.gitignore` cuma exclude build artifact
-(`sim/algorithms/**/*.exe`, `.o`, `.obj`).
+(`sim/algorithms/**/*.exe`, `.o`, `.obj`) dan `__pycache__/`.
 
 ## Toolchain
 
@@ -123,7 +123,8 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   shaping dan terlalu kompleks untuk tujuan eksperimen ini.
 - Tools analisis offline: `plot_training.py` (grafik reward/steps ->
   `training_plot.png`) dan `view_qtable.py` (grid panah kebijakan + ekspor
-  CSV/JSON). Semua file hasil di-gitignore.
+  CSV/JSON). Semua file hasil run (pkl, csv, png, gif) ikut di-track
+  di git (atas permintaan user); hanya `__pycache__` yang di-gitignore.
   - `visualize_path.py` — satu PNG per langkah jalur greedy dari Q-table
     (sel saat ini merah, nilai Q arah N/E/S/W tertulis di sel, dinding dari
     file maze; default `practice-8x8-a.txt`), ke `qpath_frames/`. Opsi

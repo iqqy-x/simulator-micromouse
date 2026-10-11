@@ -3,11 +3,6 @@ sim/algorithms/**/*.exe
 sim/algorithms/**/*.o
 sim/algorithms/**/*.obj
 
-# Runtime artifacts from the q-learning-c/q-learning algorithms
+# Python bytecode cache. Hasil run q-learning (qtable_state.pkl, qtable_export.*,
+# episode_log.csv, training_plot.png, qpath_frames/) SENGAJA di-track.
 sim/algorithms/**/__pycache__/
-sim/algorithms/**/qtable_state.pkl
-sim/algorithms/**/qtable_export.csv
-sim/algorithms/**/qtable_export.json
-sim/algorithms/**/episode_log.csv
-sim/algorithms/**/training_plot.png
-sim/algorithms/**/qpath_frames/
