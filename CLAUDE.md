@@ -128,7 +128,9 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
     (sel saat ini merah, nilai Q arah N/E/S/W tertulis di sel, dinding dari
     file maze; default `practice-8x8-a.txt`), ke `qpath_frames/`. Opsi
     `--gif` untuk animasi `jalur.gif`. Menghitung juga jalur optimal BFS
-    sebagai pembanding.
+    sebagai pembanding. Juga membuat `kebijakan.png`: grid dengan panah arah
+    Q tertinggi di tiap sel yang pernah dipelajari (jalur terbaik berwarna
+    merah muda).
 
 ## astar-c — catatan implementasi
 

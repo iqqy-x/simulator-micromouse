@@ -17,6 +17,10 @@ sama seperti run greedy akhir di main.py. Tiap gambar = satu keputusan:
 - sel hijau (G)    : sel tujuan
 Dinding digambar dari file maze, area digambar hanya sebatas bagian maze
 yang terjangkau dari start. Hasil disimpan ke qpath_frames/.
+
+Selain itu dibuat kebijakan.png: satu gambar grid dengan panah arah Q
+tertinggi di setiap sel yang pernah dipelajari (jalur terbaik berwarna
+merah muda).
 """
 
 import pickle
@@ -117,6 +121,56 @@ def greedy_path(q, maze, goals):
     return steps, (x, y) in goals
 
 
+def draw_walls(ax, maze, bbox):
+    x0, y0, x1, y1 = bbox
+    for y in range(y0, y1 + 2):
+        for x in range(x0, x1 + 1):
+            if maze.hwall(y, x):
+                ax.plot([x, x + 1], [y, y], color="black", lw=3, solid_capstyle="round")
+    for x in range(x0, x1 + 2):
+        for y in range(y0, y1 + 1):
+            if maze.vwall(y, x):
+                ax.plot([x, x], [y, y + 1], color="black", lw=3, solid_capstyle="round")
+
+
+def draw_policy(maze, q, goals, bbox, steps, out_path):
+    """Satu gambar: panah arah Q tertinggi di tiap sel yang pernah dipelajari.
+    Sel di jalur terbaik berwarna merah muda; sel kosong = belum dikunjungi."""
+    x0, y0, x1, y1 = bbox
+    on_path = {(sx, sy) for sx, sy, _ in steps}
+    fig, ax = plt.subplots(figsize=(9, 9.6))
+    ax.set_xlim(x0, x1 + 1)
+    ax.set_ylim(y0, y1 + 1)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.94, bottom=0.07)
+
+    for y in range(y0, y1 + 1):
+        for x in range(x0, x1 + 1):
+            color = "#c8e6c9" if (x, y) in goals else "#f8d7d4" if (x, y) in on_path else "white"
+            ax.add_patch(Rectangle((x, y), 1, 1, facecolor=color, edgecolor="#cccccc", lw=0.6))
+            if (x, y) in goals:
+                ax.text(x + 0.5, y + 0.5, "G", ha="center", va="center", fontsize=16, color="#2e7d32", weight="bold")
+                continue
+            opens = maze.open_dirs(x, y)
+            if not any((x, y, d) in q for d in opens):
+                continue  # belum pernah dikunjungi: tidak ada nilai Q
+            best = max(opens, key=lambda d: q.get((x, y, d), 0.0))
+            ax.text(x + 0.5, y + 0.5, ARROW[best], ha="center", va="center", fontsize=26,
+                    color="#b71c1c" if (x, y) in on_path else "#37474f")
+            if (x, y) == (0, 0):
+                ax.text(x + 0.12, y + 0.84, "S", ha="center", va="center", fontsize=11, color="#1565c0", weight="bold")
+
+    draw_walls(ax, maze, bbox)
+    ax.set_title("Kebijakan hasil Q-table: arah terbaik di tiap sel", fontsize=13, pad=10)
+    fig.text(0.5, 0.025,
+             "Panah = arah dengan Q tertinggi; merah muda = jalur terbaik dari start; "
+             "kosong = belum pernah dikunjungi",
+             ha="center", fontsize=9, color="#555555")
+    fig.savefig(out_path, dpi=110)
+    plt.close(fig)
+
+
 def draw_frame(maze, q, goals, bbox, steps, k, total_ok, out_path):
     x0, y0, x1, y1 = bbox  # batas sel inklusif
     cur_x, cur_y, action = steps[k]
@@ -146,15 +200,7 @@ def draw_frame(maze, q, goals, bbox, steps, k, total_ok, out_path):
             if (x, y) in visited:
                 ax.text(x + 0.5, y + 0.5, ARROW[visited[(x, y)]], ha="center", va="center", fontsize=18, color="#b71c1c")
 
-    # Dinding (tebal)
-    for y in range(y0, y1 + 2):
-        for x in range(x0, x1 + 1):
-            if maze.hwall(y, x):
-                ax.plot([x, x + 1], [y, y], color="black", lw=3, solid_capstyle="round")
-    for x in range(x0, x1 + 2):
-        for y in range(y0, y1 + 1):
-            if maze.vwall(y, x):
-                ax.plot([x, x], [y, y + 1], color="black", lw=3, solid_capstyle="round")
+    draw_walls(ax, maze, bbox)
 
     # Nilai Q untuk 4 arah di sel saat ini
     pos = {"N": (0.5, 0.80), "S": (0.5, 0.20), "E": (0.76, 0.5), "W": (0.24, 0.5)}
@@ -218,6 +264,10 @@ def main():
         draw_frame(maze, q, goals, bbox, steps, k, ok, p)
         files.append(p)
     print(f"{len(files)} gambar disimpan ke: {OUT_DIR}")
+
+    policy_png = OUT_DIR / "kebijakan.png"
+    draw_policy(maze, q, goals, bbox, steps, policy_png)
+    print(f"Gambar kebijakan (panah tiap sel): {policy_png}")
 
     if make_gif:
         from PIL import Image
