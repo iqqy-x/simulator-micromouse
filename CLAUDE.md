@@ -99,7 +99,7 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   Hyperparameter ada di konstanta atas `main.py` (NUM_EPISODES=500 sebagai
   batas atas, ALPHA=0.3, GAMMA=0.95).
 - Early stopping: training berhenti kalau `best_len` (langkah episode sukses
-  terpendek) tak membaik selama PATIENCE=50 episode berturut-turut (dihitung
+  terpendek) tak membaik selama PATIENCE=100 episode berturut-turut (dihitung
   setelah pertama kali sampai goal); kalau tidak, berhenti di NUM_EPISODES.
   Setelah itu: simpan Q-table, satu run greedy, lalu diam menunggu Reset.
 - Antar episode robot pulang dengan membalik jalurnya sendiri (loop dibuang
@@ -110,10 +110,11 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   hanya untuk `view_qtable.py`; `episode_log.csv` untuk `plot_training.py`.
 - Diuji dengan simulator tiruan (maze acak 8x8, dan `main()` utuh di
   `training/practice-8x8-a.txt`): tidak ada crash, pulang ke start selalu
-  pas. Dengan early stopping (patience 50) training berhenti di episode
-  ~80-200; run greedy akhir = jalur optimal BFS (22 langkah) di 11 dari 12
+  pas. Dengan early stopping (diuji dengan patience 50; default sekarang 100)
+  training berhenti di episode ~80-200; run greedy akhir = jalur optimal BFS (22 langkah) di 11 dari 12
   seed, 1 seed berakhir 24 langkah (Q belum konvergen penuh saat berhenti).
-  Belum diuji langsung di `mms` asli.
+  Run nyata di `mms` (`practice-8x8-a.txt`, patience 50): berhenti di episode
+  194 dari batas 500, 192 sukses, jalur terbaik 22 langkah = optimal.
 - Maze 9x9 yang cocok: `training/practice-8x8-a.txt` (namanya "8x8" tapi area
   bermainnya 9x9 di pojok kiri-bawah grid 16x16; goal `mms` 2x2 di (7..8,7..8)
   = pojok kanan-atas area itu).

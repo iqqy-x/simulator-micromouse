@@ -128,7 +128,7 @@ GAMMA = 0.95          # discount factor
 EPSILON_START = 1.0   # peluang aksi acak di awal
 EPSILON_MIN = 0.05
 EPSILON_DECAY = 0.99  # dikalikan ke epsilon setelah tiap episode
-PATIENCE = 50         # early stopping: berhenti kalau best_len tak membaik sekian episode
+PATIENCE = 100        # early stopping: berhenti kalau best_len tak membaik sekian episode
 
 STEP_REWARD = -1.0
 GOAL_REWARD = 100.0
