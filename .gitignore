@@ -10,3 +10,4 @@ sim/algorithms/**/qtable_export.csv
 sim/algorithms/**/qtable_export.json
 sim/algorithms/**/episode_log.csv
 sim/algorithms/**/training_plot.png
+sim/algorithms/**/qpath_frames/

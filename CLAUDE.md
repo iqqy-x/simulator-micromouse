@@ -123,6 +123,11 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
 - Tools analisis offline: `plot_training.py` (grafik reward/steps ->
   `training_plot.png`) dan `view_qtable.py` (grid panah kebijakan + ekspor
   CSV/JSON). Semua file hasil di-gitignore.
+  - `visualize_path.py` — satu PNG per langkah jalur greedy dari Q-table
+    (sel saat ini merah, nilai Q arah N/E/S/W tertulis di sel, dinding dari
+    file maze; default `practice-8x8-a.txt`), ke `qpath_frames/`. Opsi
+    `--gif` untuk animasi `jalur.gif`. Menghitung juga jalur optimal BFS
+    sebagai pembanding.
 
 ## astar-c — catatan implementasi
 
