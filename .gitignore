@@ -6,3 +6,10 @@ sim/algorithms/**/*.obj
 # Python bytecode cache. Hasil run q-learning (qtable_state.pkl, qtable_export.*,
 # episode_log.csv, training_plot.png, qpath_frames/) SENGAJA di-track.
 sim/algorithms/**/__pycache__/
+sim/webots/**/__pycache__/
+
+# Webots menulis file state GUI (posisi viewpoint, dll) per-user saat world dibuka.
+sim/webots/**/*.wbproj
+
+# Log hasil run controller (run_log.txt), dibuat ulang tiap kali disimulasikan.
+sim/webots/**/run_log.txt

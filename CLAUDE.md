@@ -30,6 +30,8 @@ micromouse/
     mms-src/          source code simulator mms, untuk dibaca/referensi
     mazes/mazefiles/  522 maze kompetisi asli (All Japan, APEC, AAMC, dst),
                        classic (16x16) / halfsize (32x32) / training
+    webots/           EKSPERIMEN — gerak kontinu (bukan diskret seperti mms).
+                       Lihat catatan di bawah dan sim/webots/README.md.
   firmware/           BELUM ADA — rencana kode STM32F401CCU6 asli,
                        masih di device lain milik user
 ```
@@ -164,6 +166,70 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
 - Sempat terhambat build di Windows karena kebijakan Application Control
   organisasi memblokir `collect2.exe` (bagian linker MinGW), sudah
   dibereskan sendiri oleh user.
+
+## webots — catatan implementasi
+
+- Eksperimen gerak **kontinu**, beda fundamental dari `mms`: di `mms`,
+  algoritma kirim perintah diskret ("maju 1 sel", "belok 90°") dan posisi
+  tujuan + cek tabrakan ditentukan SEBELUM animasi mulai (lihat
+  `Window::updateMouseProgress` di `mms-src`) — animasinya mulus tapi
+  keputusannya tetap grid. Di Webots, robot dikirim kecepatan roda
+  (`v_kiri`, `v_kanan` rad/s) dan fisika/tabrakan dihitung tiap
+  `basicTimeStep` (16 ms) secara real-time — ini yang bikin `mms` tidak
+  cocok diedit jadi kontinu tanpa merombak total, sementara Webots memang
+  dirancang untuk ini dari awal.
+- `sim/webots/tools/maze_to_webots.py`: konverter file maze ASCII (format
+  sama dengan `sim/mazes/mazefiles/`, dipakai juga `flood-fill-c`/`astar-c`)
+  menjadi dunia Webots (`.wbt`). Dimensi sel/dinding diambil dari
+  `docs/micromouse-rules.md` (classic 18cm / halfsize 9cm).
+- Robot didefinisikan LANGSUNG di dalam `.wbt` yang di-generate (bukan
+  PROTO terpisah) — sengaja disederhanakan untuk draft pertama. 2 roda
+  (`HingeJoint`+`RotationalMotor`, mode kecepatan via `setPosition(inf)`)
+  + 1 "skid" (bola licin) sebagai titik tumpu ketiga, dan 3
+  `DistanceSensor` (depan, kiri-diagonal, kanan-diagonal) meniru sensor IR
+  reflektif (`TEFT4300+SFH4545`) yang dipakai di board asli.
+- `controllers/micromouse_controller/micromouse_controller.py`: sekarang
+  berisi primitif gerak `drive_forward_cells(n)` dan `turn("left"/"right")`
+  yang pakai feedback encoder (`PositionSensor` di tiap roda, radian
+  kumulatif) untuk presisi, bukan kecepatan+waktu tebakan — ini layer
+  kendali rendah yang nanti dipanggil planner (flood-fill/A*/Q-table,
+  format sama dengan versi mms) alih-alih moveForward/turnLeft/turnRight.
+  Belum ada fungsi baca-dinding dari sensor (pengganti wallFront/Left/
+  Right versi mms) dan belum ada port algoritma sungguhan — baru urutan
+  uji primitif manual.
+- **Status (divalidasi bertahap oleh user, bukan oleh saya — tidak ada GUI
+  Webots di sesi ini)**:
+  - Fisika dasar (roda, body, maju lurus, berhenti sebelum nabrak) —
+    **sudah dites jalan**. Sempat ada bug: `Cylinder` roda diberi rotasi
+    tambahan yang tidak perlu sehingga sumbu putarnya tidak sejajar
+    `HingeJoint`-nya (roda "rebah", bukan berdiri) — sudah diperbaiki
+    (rotasi itu dihapus dari `maze_to_webots.py`).
+  - Primitif `drive_forward_cells`/`turn` — **divalidasi lewat
+    `run_log.txt`** (urutan uji maju-kanan-maju-kiri-maju): semua "maju 1
+    sel" dalam <0.1% dari target (11.259-11.260 vs 11.250 rad), kedua
+    belokan <1% dari target (3.167 vs 3.142 rad). Tidak ada undershoot
+    (tanda nabrak) di sepanjang satu-satunya jalur yang bebas tabrakan di
+    maze itu → arah belok kemungkinan besar sudah benar, tapi ini
+    inferensi dari data encoder, BUKAN konfirmasi visual langsung.
+  - Sensor kiri/kanan dipasang **diagonal ~35° ke depan** (bukan tegak
+    lurus 90°, meniru tata letak sensor micromouse asli) — jadi BUKAN
+    pengganti langsung `wallLeft()`/`wallRight()` versi mms yang instan
+    ya/tidak persis di sisi, perlu interpretasi beda nanti.
+  - Lihat `sim/webots/README.md` untuk daftar lengkap yang mungkin perlu
+    disetel user (kalibrasi sensor, gesekan, dll).
+- **Rencana aktif: ganti body/roda placeholder (Box/Cylinder) dengan mesh
+  3D robot asli user** — file `.obj` per-bagian (body, roda kiri, roda
+  kanan) hasil export Tinkercad. `maze_to_webots.py` perlu diubah untuk
+  pakai node `Mesh { url "meshes/....obj" } }` alih-alih `Box`/`Cylinder`
+  placeholder, dengan skala/posisi disesuaikan dimensi mesh asli (Tinkercad
+  biasanya ekspor mm, Webots pakai meter). **BELUM dikerjakan** — menunggu
+  file ditaruh di `sim/webots/micromouse_webots/meshes/` + nama file/
+  dimensi dari user.
+- Webots Python API (`controller` module) bawaannya pure Python + ctypes
+  (`wb.py` load DLL native via `WEBOTS_HOME`), BUKAN ekstensi terkompilasi
+  per-versi Python — jadi tidak perlu `pip install` apa pun, Python
+  manapun (termasuk 3.13 yang dipakai di mesin ini) langsung jalan selama
+  dilaunch oleh Webots sendiri (bukan dari terminal luar/`extern`).
 
 ## Hardware — catatan dari review skematik
 
