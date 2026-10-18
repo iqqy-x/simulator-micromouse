@@ -217,6 +217,20 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   membandingkan dinding terbaca vs file maze. Hasil uji headless:
   66/66 benar ( depan 1839-2814 vs kosong 0-38; samping 294-612 vs kosong 0-57).
   Kurva respons sensor masih PERKIRAAN — ganti dengan hasil ukur asli.
+- `controllers/floodfill/floodfill.py` (dunia `micromouse_floodfill.wbt`):
+  flood fill Python di Webots, hanya dari sensor. Sel start diluruskan dengan mundur ke dinding belakang (tanpa
+  berputar), jelajah
+  bolak-balik tengah/start sampai jalur terbukti optimal, lalu lari cepat
+  `run_path`. Mode `MM_SEARCH=continuous` (bawaan; `search_run` di pustaka:
+  tanpa berhenti, belok halus, keputusan diambil 95 mm sebelum tengah sel
+  dari jendela DL/DR dan FL/FR) vs `cell` (berhenti di tiap sel). Hasil di
+  practice-8x8-a: continuous 114 langkah/176 s simulasi, peta 0 salah;
+  cell 114 langkah/351 s, peta 0 salah; lari cepat 22 langkah (optimal)
+  15.3 s, sampai di tujuan. Pembacaan sisi di sel tepat sesudah busur
+  ("terlambat") kurang andal (nilai tumpang tindih) -- lihat README.
+  Berhenti darurat bila FL/FR melihat dinding depan mendadak <55 mm saat
+  seharusnya terbuka (`on_blocked`, reroute). `MM_MAZE` memilih labirin lain;
+  file maze hanya untuk ukuran dan penilaian.
 - **Status** (diuji headless lewat `webots.exe --batch --no-rendering
   --mode=fast`; controller berupa Supervisor sehingga posisi SEBENARNYA
   tercatat di `run_log.txt` untuk validasi, tidak dipakai navigasi):

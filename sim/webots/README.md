@@ -18,6 +18,7 @@ sim/webots/
       micromouse.wbt          hasil generate dari maze training/minimaze.txt
       micromouse_practice8x8.wbt   dari training/practice-8x8-a.txt; controller
                                    wall_test (uji pembacaan dinding)
+      micromouse_floodfill.wbt     practice-8x8-a; controller floodfill
     meshes/                    model 3D Tinkercad + potongan per warna (parts/)
     controllers/
       micromouse_controller/
@@ -27,6 +28,8 @@ sim/webots/
         run_log.txt                 (dibuat otomatis tiap run, gitignored)
       wall_test/
         wall_test.py               uji baca dinding di practice-8x8-a
+      floodfill/
+        floodfill.py               flood fill: jelajah dengan sensor + lari cepat
 ```
 
 ## Cara membuka
@@ -70,6 +73,54 @@ sim/webots/
   kiri x2, maju, belok kanan x2 = 40 belokan) berakhir 2 mm dari titik awal
   dan arah meleset <1 derajat -- tidak menumpuk karena tiap belok
   menambah +-90 derajat ke arah acuan dan saat maju yaw dikoreksi ke acuan.
+- **Flood fill (`controllers/floodfill/floodfill.py`, dunia
+  `micromouse_floodfill.wbt`)**: sel start diluruskan dengan MUNDUR sampai PCB
+  belakang (datar) menempel dinding belakang (`square_to_back_wall`; kiri,
+  kanan, belakang sel start diasumsikan dinding sesuai aturan, depan dibaca
+  FL/FR tanpa berputar), lalu jelajah bolak-balik tengah/start sampai jalur terbukti
+  optimal (jalur diketahui = perkiraan optimis), lalu lari cepat `run_path`.
+  Dinding hanya dari sensor; file maze hanya untuk ukuran labirin dan
+  penilaian. Dua mode (`MM_SEARCH`): `continuous` (bawaan) dan `cell`.
+  Hasil di practice-8x8-a (deterministik, hasil sama tiap run):
+
+  | | `cell` | `continuous` |
+  |---|---|---|
+  | Jelajah | 114 langkah, 351 s simulasi | 114 langkah, 176 s |
+  | Peta (sisi diketahui / salah) | 201 / 0 | 195 / 0 |
+  | Lari cepat | 22 langkah (optimal), 15.3 s, sampai tujuan | sama |
+
+  `continuous` memakai `search_run` di pustaka: tidak berhenti di tiap sel,
+  belok halus, keputusan flood fill diambil SAMBIL BERGERAK 95 mm sebelum
+  tengah tiap sel yang dimasuki (di situ busur belok harus dimulai): dinding
+  kiri/kanan dari DL/DR (jendela 140-95 mm sebelum tengah sel) dan dinding
+  depan dari FL/FR (jendela 130-95 mm; jarak 125-165 mm, nilai 120-270 vs 0
+  kalau terbuka; ambang 60). Sel PERTAMA sesudah busur ("terlambat": robot
+  baru keluar busur, jendela itu sudah lewat) memakai jendela 90-70 mm dan
+  keputusan di 70 mm sebelum tengah; di situ hanya lurus yang halus --
+  belok berarti berhenti di tengah sel lalu diputar di tempat, dan dinding
+  samping hanya dipakai bila sisi itu belum diketahui (ambang 260, sinar
+  yang lolos lewat sisi terbuka mengenai dinding depan sel tetangga pada
+  nilai ~180-210, mirip dinding samping yang terbaca 240-800 sesudah busur).
+  **Meluruskan di sel start:** robot mundur 75 mm (jarak ke dinding belakang
+  55 mm + 20 mm); kalau miring 6 derajat, dinding meluruskannya kembali ke
+  90.00 derajat (uji `MM_START_TILT_DEG=6`); arah acuan gyro di-reset lalu
+  maju ke tengah sel (persiapan 3.6 s, sebelumnya pemindaian 24 s).
+  **Berhenti darurat:** di jalur lurus sesudah aksi "F" (dinding depan
+  diperkirakan terbuka) FL/FR dipantau; kalau rata-ratanya melewati 1300
+  (dinding < ~55 mm dari sensor) robot langsung direm, maju/mundur ke tengah
+  sel, peta diperbaiki (`on_blocked`), dan rute dihitung ulang sebelum
+  diputar di tempat. Diuji dengan `MM_BLIND_FRONT=0,2` (dinding depan sel itu
+  sengaja dianggap terbuka): henti darurat jalan, reroute, dan tetap sampai
+  di tujuan dengan jalur akhir optimal. Pada kunjungan normal tidak pernah
+  terpicu (0 kali). Pantauan tidak aktif di busur belok dan di tahap
+  berhenti terencana (jalan buntu, tujuan).
+  **Keterbatasan:** pembacaan samping di sel terlambat tumpang tindih
+  (dinding asli 241-800 vs salah baca 184-287), jadi satu-dua sisi bisa salah
+  (di run normal terakhir peta 0 salah, tapi uji lain menunjukkan hasil yang masih berubah-ubah); pembacaan
+  normal di kunjungan lain menimpanya. Putar balik (jalan buntu) berhenti di
+  tengah sel dan diputar 180 derajat di tempat. Tidak ada deteksi macet.
+  `MM_MAZE=<file>` memilih labirin lain (generate dunianya dari file yang
+  sama), `MM_MAX_TRIPS` membatasi jumlah perjalanan.
 - **Pemusatan lateral dengan DL/DR (PID bertingkat, `CENTER_*`)**: di jalur
   lurus, galat lateral e (m, + = robot di kiri tengah lorong) dihitung dari
   jarak sinar DL/DR ke dinding (kebalikan kurva respons sensor; dua dinding:

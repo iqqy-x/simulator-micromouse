@@ -79,7 +79,7 @@ FRONT_SAMPLES = 5
 # ~105 mm (nilai ~400); tidak ada -> sinar keluar sel, >250 mm (nilai 0).
 SIDE_SAMPLE_AT = 0.045   # m jarak tempuh dari tengah sel sebelumnya
 SIDE_WINDOW = 0.040      # m lebar jendela (rata-rata semua sampel di dalamnya)
-SIDE_THRESHOLD = 120.0
+SIDE_THRESHOLD = 145.0
 
 log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_log.txt")
 log_file = open(log_path, "w", encoding="utf-8")
@@ -205,16 +205,21 @@ def _drive(dist, side_cells=0):
 
 
 def drive_forward_cells(n=1):
-    """Maju N sel lurus dari posisi sekarang sampai tengah sel ke-N. Sambil
-    jalan, DL/DR disampel untuk dinding kiri/kanan tiap sel yang dimasuki.
-    Return: daftar (kiri, kanan) satu per sel."""
+    """Maju N sel lurus dari posisi sekarang sampai tengah sel ke-N, mulai dan
+    berhenti dari diam (profil trapesium) dengan pemusatan DL/DR aktif.
+    Sambil jalan, DL/DR disampel untuk dinding kiri/kanan tiap sel yang
+    dimasuki. Return: daftar (kiri, kanan) satu per sel."""
     global offset, last_side_walls, last_side_values
-    l0, r0 = left_enc.getValue(), right_enc.getValue()
-    samples, avg = _drive(n * CELL - offset, side_cells=n)
+    # jendela sampel dalam jarak tempuh d dari posisi sekarang (offset = jarak
+    # robot di depan tengah sel sebelumnya)
+    watch = [(("side", k),
+              k * CELL + SIDE_SAMPLE_AT - SIDE_WINDOW / 2.0 - offset,
+              k * CELL + SIDE_SAMPLE_AT + SIDE_WINDOW / 2.0 - offset) for k in range(n)]
+    got = _run_straight(n * CELL - offset, 0.0, 0.0, watch)
+    settle()
+    samples = [[(s[2], s[3]) for s in got[("side", k)]] for k in range(n)]
     offset = 0.0
-    log(f"maju {n} sel: tercapai={avg:.3f} rad "
-        f"(kiri={left_enc.getValue() - l0:.3f}, kanan={right_enc.getValue() - r0:.3f}), "
-        f"yaw={math.degrees(yaw):.1f}")
+    log(f"maju {n} sel: yaw={math.degrees(yaw):.1f}")
 
     result = []
     for cell_samples in samples:
@@ -226,6 +231,31 @@ def drive_forward_cells(n=1):
     last_side_walls = (result[-1][0], result[-1][1])
     last_side_values = (result[-1][2], result[-1][3])  # nilai rata-rata, untuk log/kalibrasi
     return [(r[0], r[1]) for r in result]
+
+
+REAR_TO_AXLE = 0.029   # m, tepi belakang PCB (datar) di belakang sumbu roda
+BACK_SPEED = 0.05      # m/s saat mundur ke dinding belakang
+
+
+def square_to_back_wall(extra=0.02):
+    """Luruskan robot dengan mundur sampai tepi belakang PCB (datar) menempel
+    dinding belakang sel start. Jarak ke dinding dari tengah sel = HALF_LANE;
+    mundur sedikit lebih jauh (extra) supaya pasti menempel; roda boleh
+    tergelincir sebentar. Penjaga arah dimatikan selama mundur agar dinding
+    yang meluruskan badan. Sesudahnya arah acuan (gyro) di-reset ke 'lurus
+    pada dinding' dan posisi diketahui (offset = -(HALF_LANE - REAR_TO_AXLE)),
+    jadi center() tinggal maju ke tengah sel. Hanya untuk sel start yang
+    punya dinding belakang."""
+    global offset, yaw
+    gap = HALF_LANE - REAR_TO_AXLE
+    l0, r0 = left_enc.getValue(), right_enc.getValue()
+    while -_distance_since(l0, r0) < gap + extra:
+        set_wheels(-BACK_SPEED / WHEEL_R, -BACK_SPEED / WHEEL_R)
+        step()
+    settle()
+    yaw = target_yaw
+    offset = -gap
+    log(f"luruskan ke dinding belakang: mundur {gap + extra:.3f} m, arah di-reset")
 
 
 def center():
@@ -448,15 +478,24 @@ def _true_pose():
     return (x, y, math.degrees(math.atan2(r[3], r[0])))
 
 
-def _run_straight(length, v_in, v_out, watch):
+def _run_straight(length, v_in, v_out, watch, vmax=None, front_stop=None):
     """Lurus sejauh length (m): naik dari v_in, jelajah V_CRUISE, turun ke
     v_out. watch = daftar (kunci, d_awal, d_akhir): sampel sensor diambil saat
     jarak tempuh d di dalam jendela; return dict kunci -> daftar sampel."""
     l0, r0 = left_enc.getValue(), right_enc.getValue()
     got = {key: [] for key, _, _ in watch}
     centering = _Centering()
+    vmax = V_CRUISE if vmax is None else vmax
+    got["_d"] = 0.0
     while True:
         d = _distance_since(l0, r0)
+        got["_d"] = d
+        if front_stop is not None and d > 0.02 and \
+                (sensors["ds_fl"].getValue() + sensors["ds_fr"].getValue()) / 2.0 > front_stop:
+            # dinding depan jauh lebih dekat daripada yang diperkirakan: rem
+            got["_blocked"] = True
+            set_wheels(0.0, 0.0)
+            break
         for key, lo, hi in watch:
             if lo <= d <= hi:
                 got[key].append((sensors["ds_fl"].getValue(), sensors["ds_fr"].getValue(),
@@ -464,7 +503,7 @@ def _run_straight(length, v_in, v_out, watch):
                                  _true_pose(), math.degrees(math.asin(self_node.getOrientation()[6]))))
         if d >= length - END_TOL:
             break
-        v = min(V_CRUISE,
+        v = min(vmax,
                 math.sqrt(v_in * v_in + 2.0 * ACCEL_LIN * d),
                 math.sqrt(v_out * v_out + 2.0 * ACCEL_LIN * max(length - d, 0.0)))
         offset_yaw = centering.update()
@@ -473,10 +512,11 @@ def _run_straight(length, v_in, v_out, watch):
     return got
 
 
-def _run_arc(direction):
+def _run_arc(direction, v=None):
     """Belok halus 90 derajat dengan V_TURN: yaw acuan mengikuti smoothstep
     terhadap jarak busur, ditambah umpan maju laju putar."""
     global target_yaw
+    v = V_TURN if v is None else v
     sign = 1.0 if direction == "left" else -1.0
     yaw_start = target_yaw
     l0, r0 = left_enc.getValue(), right_enc.getValue()
@@ -486,8 +526,8 @@ def _run_arc(direction):
             break
         t = s / ARC_LEN
         yaw_ref = yaw_start + sign * (math.pi / 2) * _smoothstep(t)
-        omega_ff = sign * (math.pi / 2) * _smoothstep_rate(t) / ARC_LEN * V_TURN
-        _set_speed(V_TURN, omega_ff + YAW_KP * (yaw_ref - yaw))
+        omega_ff = sign * (math.pi / 2) * _smoothstep_rate(t) / ARC_LEN * v
+        _set_speed(v, omega_ff + YAW_KP * (yaw_ref - yaw))
         step()
     target_yaw = yaw_start + sign * math.pi / 2
 
@@ -561,9 +601,10 @@ def run_path(plan):
 
     obs = [{"front": None, "left": None, "right": None, "front_value": None,
             "left_value": None, "right_value": None, "pose": None} for _ in range(n)]
-    for (kind, k), lst in samples.items():
-        if not lst:
+    for key, lst in samples.items():
+        if not isinstance(key, tuple) or not lst:   # "_d"/"_blocked": bukan sampel
             continue
+        kind, k = key
         if kind == "front":
             val = sum((s[0] + s[1]) / 2.0 for s in lst) / len(lst)
             obs[k]["front"] = val > FRONT_THRESHOLD
@@ -580,6 +621,130 @@ def run_path(plan):
     offset = 0.0
     last_side_walls = (obs[-1]["left"], obs[-1]["right"]) if obs else None
     return obs
+
+
+# ---------------------------------------------------------------------------
+# Jelajah berkelanjutan (search run): keputusan arah diambil SAMBIL BERGERAK.
+# ---------------------------------------------------------------------------
+# Titik keputusan untuk sel C ada 95 mm sebelum tengah C (kira-kira batas
+# masuk C, di situ busur belok halus harus dimulai). Pada titik itu:
+#   - dinding kiri/kanan C dari DL/DR (jendela 140-95 mm sebelum tengah C; sinar
+#     diagonal mengenai dinding samping C pada posisi itu),
+#   - dinding depan C dari FL/FR (jendela 130-95 mm sebelum tengah C; jarak ke
+#     dinding depan 125-165 mm, nilai ~120-270 vs 0 kalau terbuka).
+# Sel pertama sesudah busur belok: robot baru keluar busur tepat di batas
+# masuk, jendela di atas sudah lewat. Jendela diganti 90-70 mm sebelum tengah
+# dan keputusan diambil 70 mm sebelum tengah ("terlambat"; lebih dekat dari 50 mm
+# sinar DL/DR sudah melewati batas sel dan melihat sel berikutnya): lurus tetap bisa,
+# tapi belok harus berhenti dulu di tengah sel lalu diputar di tempat.
+V_SEARCH = 0.22          # m/s kecepatan jelajah (lurus dan busur)
+DECIDE_BEFORE = 0.095    # m sebelum tengah sel: titik keputusan
+FRONT_EARLY_THRESHOLD = 60.0   # nilai FL/FR rata-rata: dinding depan ada (jarak 125-165 mm)
+LATE_DECIDE_BEFORE = 0.07
+# Berhenti darurat: di jalur lurus sesudah aksi "F" (dinding depan diperkirakan
+# terbuka), kalau rata-rata FL/FR melewati nilai ini (dinding < ~55 mm dari
+# sensor, nilai ~1300) robot langsung direm dan peta diperbaiki lewat
+# on_blocked().
+FRONT_STOP_VALUE = 1300.0
+# Di sel "terlambat" robot lebih dekat ke batas sel: sinar DL/DR yang lolos
+# lewat sisi terbuka mengenai dinding DEPAN sel tetangga pada jarak 0.15-0.17 m
+# (nilai ~180-210), mirip dinding samping (nilai >300 di sini). Ambangnya
+# dinaikkan supaya tidak salah baca.
+SIDE_THRESHOLD_LATE = 260.0
+
+
+def _early_observation(got, key_side, key_front, side_threshold=SIDE_THRESHOLD):
+    out = {"front": None, "left": None, "right": None,
+           "front_value": None, "left_value": None, "right_value": None}
+    front = got.get(key_front) or []
+    if front:
+        val = sum((x[0] + x[1]) / 2.0 for x in front) / len(front)
+        out["front"], out["front_value"] = val > FRONT_EARLY_THRESHOLD, val
+    side = got.get(key_side) or []
+    if side:
+        ml = sum(x[2] for x in side) / len(side)
+        mr = sum(x[3] for x in side) / len(side)
+        out["left"], out["right"] = ml > side_threshold, mr > side_threshold
+        out["left_value"], out["right_value"] = ml, mr
+    return out
+
+
+def search_run(on_cell, on_blocked=None):
+    """Jelajah tanpa berhenti di tiap sel. Mulai di tengah sel dan diam,
+    menghadap arah gerak. Di titik keputusan tiap sel C yang dimasuki,
+    on_cell(obs) dipanggil dengan dinding C yang teramati
+    (obs: front/left/right = True/False/None, *_value) dan harus
+    mengembalikan aksi relatif arah hadap:
+        "F" lurus terus, "L"/"R" belok halus ke sel berikutnya,
+        "U" berhenti di tengah C lalu putar balik di tempat,
+        "STOP" berhenti di tengah C dan selesai.
+    Belok di sel yang terlambat diputuskan (lihat di atas) menjadi
+    berhenti di tengah C + putar di tempat. Return: jumlah sel dimasuki."""
+    global offset
+    center()
+    to_center = CELL      # jarak dari awal segmen sekarang ke tengah sel berikutnya
+    v_in = 0.0
+    cells = 0
+    prev_before = None
+    while True:
+        late = to_center - DECIDE_BEFORE < 0.02
+        before = LATE_DECIDE_BEFORE if late else DECIDE_BEFORE
+        s_dec = to_center - before
+        side_lo = max(to_center - (0.09 if late else 0.14), 0.0)
+        front_lo = max(to_center - (0.09 if late else 0.13), 0.0)
+        watch = [(("side", 0), side_lo, s_dec), (("front", 0), front_lo, s_dec)]
+        got = _run_straight(s_dec, v_in, V_SEARCH, watch, vmax=V_SEARCH,
+                            front_stop=FRONT_STOP_VALUE if (v_in > 0 and on_blocked) else None)
+        if got.get("_blocked"):
+            # Dinding depan mendadak dekat padahal diperkirakan terbuka: sudah
+            # direm. Maju/mundur ke tengah sel yang sedang dilewati, minta
+            # peta diperbaiki dan arah baru, lalu putar di tempat.
+            settle()
+            _drive(prev_before - got["_d"])   # tengah sel itu ada prev_before di depan titik keputusan
+            settle()
+            action = on_blocked()
+            log(f"BERHENTI DARURAT: dinding depan mendadak dekat, aksi baru {action}")
+            if action in ("L", "R"):
+                _point_turn("left" if action == "L" else "right")
+            elif action == "U":
+                _point_turn("left")
+                _point_turn("left")
+            else:
+                raise ValueError(f"aksi tidak dikenal setelah henti darurat: {action}")
+            to_center = CELL
+            v_in = 0.0
+            prev_before = None
+            continue
+        obs = _early_observation(got, ("side", 0), ("front", 0),
+                                 SIDE_THRESHOLD_LATE if late else SIDE_THRESHOLD)
+        obs["late"] = late
+        cells += 1
+        action = on_cell(obs)
+        prev_before = before
+
+        if action == "F":
+            to_center = (to_center - s_dec) + CELL
+            v_in = V_SEARCH
+            continue
+        if action in ("L", "R") and not late:
+            _run_arc("left" if action == "L" else "right", v=V_SEARCH)
+            to_center = CELL / 2.0   # keluar busur di batas masuk sel berikutnya
+            v_in = V_SEARCH
+            continue
+        # berhenti di tengah sel C
+        _run_straight(to_center - s_dec, V_SEARCH, 0.0, [], vmax=V_SEARCH)
+        settle()
+        if action == "STOP":
+            return cells
+        if action in ("L", "R"):
+            _point_turn("left" if action == "L" else "right")
+        elif action == "U":
+            _point_turn("left")
+            _point_turn("left")
+        else:
+            raise ValueError(f"aksi tidak dikenal: {action}")
+        to_center = CELL
+        v_in = 0.0
 
 
 if __name__ == "__main__":
