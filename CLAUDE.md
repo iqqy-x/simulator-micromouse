@@ -232,12 +232,24 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   -- lihat README. Berhenti terencana di depan dinding (jalan buntu, belok di
   sel terlambat) berhenti 19 mm lebih awal supaya tepi PCB >= 37 mm dari
   dinding; `MM_CLEARANCE=1` mengukur jarak bebas PCB-dinding (belok halus
-  22-29 mm; satu macet 6 s di jalan buntu dengan galat lateral ~23 mm).
+  22-29 mm). Macet di jalan buntu (galat lateral ~22 mm) diperbaiki dengan
+  `_lateral_nudge` sebelum putar di tempat; pemusatan DL/DR dimatikan bila
+  dinding depan dekat (DL/DR melihat dinding depan).
   Berhenti darurat (jarak aman 37 mm dari tepi depan PCB ke dinding,
   `SAFE_STOP_NOSE`; tidak maju lagi setelah rem) bila FL/FR melihat dinding
   depan mendadak (~59.5 mm sensor-dinding) saat
   seharusnya terbuka (`on_blocked`, reroute). `MM_MAZE` memilih labirin lain;
   file maze hanya untuk ukuran dan penilaian.
+- `controllers/qlearning/qlearning.py` (dunia `micromouse_qlearning.wbt`):
+  Q-learning tabular yang sama dengan `sim/algorithms/q-learning`, di atas
+  `search_run` (`on_cell`/`on_blocked`). Antar episode robot dipindahkan ke
+  start lewat Supervisor; `MM_EPISODES`/`MM_PATIENCE`/`MM_MAX_STEPS`/`MM_SEED`
+  dll. Hasil di practice-8x8-a (seed 7): early stopping di episode 139,
+  22 langkah (optimal) sejak episode 39, greedy akhir 24 langkah, lari cepat
+  16.9 s; 0 saturasi/rem darurat/busur gagal. Keandalan eksplorasi acak:
+  `late_arc_with_front=False`, `conservative_sides` + verifikasi sisi ambigu,
+  `StallError`, skala roda saat saturasi (lihat README). Keluaran `episode_log.csv`
+  dan `qtable_state.pkl` di folder controller (di-gitignore).
 - **Status** (diuji headless lewat `webots.exe --batch --no-rendering
   --mode=fast`; controller berupa Supervisor sehingga posisi SEBENARNYA
   tercatat di `run_log.txt` untuk validasi, tidak dipakai navigasi):

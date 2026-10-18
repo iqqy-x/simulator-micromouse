@@ -85,8 +85,12 @@ log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_log.txt
 log_file = open(log_path, "w", encoding="utf-8")
 
 
+LOG_TO_CONSOLE = True   # False: log() hanya ke run_log.txt (controller boleh mengatur console sendiri)
+
+
 def log(msg):
-    print(msg)
+    if LOG_TO_CONSOLE:
+        print(msg)
     log_file.write(msg + "\n")
     log_file.flush()
 
@@ -127,7 +131,27 @@ def step():
     yaw += gyro.getValues()[2] * DT
 
 
+MAX_WHEEL = 31.416       # rad/s, maxVelocity motor di generator (N20 300 RPM)
+saturation_events = 0   # berapa kali perintah roda melebihi MAX_WHEEL
+
+
 def set_wheels(left, right):
+    """Kirim kecepatan roda. Kalau salah satu melebihi MAX_WHEEL, KEDUANYA diskala
+    bersama (rasio, jadi kelengkungan jalur, tetap) -- dulu hanya dipotong oleh
+    Webots (roda luar saja) sambil membanjiri console dengan peringatan."""
+    global saturation_events
+    biggest = max(abs(left), abs(right))
+    if biggest > MAX_WHEEL:
+        saturation_events += 1
+        if saturation_events <= 20:
+            import sys
+            err = target_yaw - yaw
+            log(f"SATURASI roda #{saturation_events}: diminta kiri={left:.1f} kanan={right:.1f} rad/s "
+                f"(maks {MAX_WHEEL}), dari {sys._getframe(2).f_code.co_name}, "
+                f"galat arah {math.degrees(err):+.1f} derajat, t={robot.getTime():.1f} s, "
+                f"pose sebenarnya x={self_node.getPosition()[0]:.3f} y={self_node.getPosition()[1]:.3f}")
+        scale = MAX_WHEEL / biggest
+        left, right = left * scale, right * scale
     left_motor.setVelocity(left)
     right_motor.setVelocity(right)
 
@@ -375,6 +399,7 @@ CENTER_KD = 0.3        # rad per (m/s)
 CENTER_MAX = 0.20      # rad batas offset arah (~11 derajat)
 CENTER_I_MAX = 0.02    # m*s batas integral (anti-windup)
 CENTER_FILTER = 0.4    # bobot sampel baru pada penyaring galat
+CENTER_FRONT_BLOCK = 400.0   # nilai FL/FR di atas ini: dinding depan < ~100 mm, DL/DR melihat dinding depan
 CENTER_VALID_MIN = 70.0   # nilai sensor di bawah ini dianggap "tidak ada dinding"
 HALF_LANE = 0.084      # m, setengah lebar lorong dalam (CELL/2 - tebal dinding/2)
 SENSOR_LAT = 0.0095    # m, DL/DR di samping sumbu tengah (sama dengan generator)
@@ -421,6 +446,13 @@ class _Centering:
     def update(self):
         if not CENTER_ENABLED:
             return 0.0
+        # Dinding depan dekat (nilai FL/FR tinggi): sinar diagonal DL/DR mengenai
+        # dinding DEPAN, bukan dinding samping (terjadi bila robot < ~50 mm dari
+        # tengah sel dan ada dinding depan), sehingga galat lateral palsu dan
+        # robot dibelokkan keras. Pemusatan dimatikan, offset memudar.
+        if (sensors["ds_fl"].getValue() + sensors["ds_fr"].getValue()) / 2.0 > CENTER_FRONT_BLOCK:
+            self.cmd *= 0.85
+            return self.cmd
         e = _lateral_error()
         if e is None:
             # tak ada dinding: offset memudar halus ke nol
@@ -463,6 +495,13 @@ ARC_LEN = _arc_length()
 
 
 _ARC_SHAPES = {}
+
+
+class StallError(Exception):
+    """Gerak tertahan (mis. badan menekan dinding) sampai melewati batas waktu."""
+
+
+ARC_FAIL_DEG = 10.0   # galat arah sesudah busur di atas ini dianggap busur gagal
 
 
 def _arc_shape(forward, lateral=CELL / 2.0):
@@ -529,8 +568,13 @@ def _run_straight(length, v_in, v_out, watch, vmax=None, front_stop=None):
     centering = _Centering()
     vmax = V_CRUISE if vmax is None else vmax
     got["_d"] = 0.0
+    t_run0 = robot.getTime()
+    max_t = 3.0 * length / max(0.5 * vmax, V_MIN) + 3.0
     while True:
         d = _distance_since(l0, r0)
+        if robot.getTime() - t_run0 > max_t:
+            set_wheels(0.0, 0.0)
+            raise StallError("lurus tertahan (waktu habis)")
         got["_d"] = d
         if front_stop is not None and d > 0.02 and \
                 (sensors["ds_fl"].getValue() + sensors["ds_fr"].getValue()) / 2.0 > front_stop:
@@ -568,10 +612,14 @@ def _run_arc(direction, v=None, forward=None):
     sign = 1.0 if direction == "left" else -1.0
     yaw_start = target_yaw
     l0, r0 = left_enc.getValue(), right_enc.getValue()
+    t_arc0 = robot.getTime()
     while True:
         s = _distance_since(l0, r0)
         if s >= arc_len - END_TOL:
             break
+        if robot.getTime() - t_arc0 > 3.0 * arc_len / v + 1.0:
+            set_wheels(0.0, 0.0)
+            raise StallError("busur tertahan (waktu habis)")
         t = s / arc_len
         sm = max(_smoothstep(t), 1e-9)
         yaw_ref = yaw_start + sign * (math.pi / 2) * sm ** p
@@ -579,6 +627,11 @@ def _run_arc(direction, v=None, forward=None):
         _set_speed(v, omega_ff + YAW_KP * (yaw_ref - yaw))
         step()
     target_yaw = yaw_start + sign * math.pi / 2
+    if abs(target_yaw - yaw) > math.radians(ARC_FAIL_DEG):
+        # busur tidak selesai (badan tertahan, mis. menyentuh dinding): luruskan
+        # arah ke acuan supaya pelacakan arah tetap benar
+        log(f"BUSUR GAGAL: arah {math.degrees(yaw - target_yaw):+.0f} derajat dari acuan, diputar di tempat")
+        _rotate_by(0.0)
 
 
 def _build_segments(plan):
@@ -719,35 +772,50 @@ SIDE_LATE_MIN = 140.0   # nilai rata-rata minimum agar dianggap dinding di sel t
 RISING_RATIO = 1.12     # nilai separuh akhir jendela > rasio * separuh awal -> sinar makin dekat
 
 
+E_EST_MIN = 300.0         # nilai sisi yang cukup jelas dinding untuk menaksir galat lateral
+NUDGE_MIN = 0.010         # m: geser lateral dulu bila |galat| lebih dari ini sebelum putar di tempat
+NUDGE_MAX = 0.040
+NUDGE_ANGLE = math.radians(15)
 VERY_CLOSE_WALL = 700.0   # nilai sisi lawan di atas ini: robot sangat dekat ke dinding itu (>~22 mm dari tengah)
+AMBIGUOUS_MIN = 180.0     # di bawah ini (naik) lebih mungkin sinar lolos (terbaca 125-165) daripada dinding jauh
 AMBIGUOUS_MAX = 330.0     # di bawah ini (dan di atas SIDE_LATE_MIN) nilai tak bisa dibedakan dari salah baca
 
 
-def _side_wall_late(values, other_mean=0.0):
+def _side_wall_late(values, other_mean=0.0, conservative=False):
     """Dinding samping di sel tepat sesudah busur dari urutan nilai sensor di jendela.
     Dinding samping sungguhan sejajar arah gerak: jaraknya (nilainya) tetap selama
     robot maju. Sinar yang lolos lewat sisi terbuka mengenai dinding DEPAN sel
     tetangga: jaraknya mengecil ~1.4 mm per mm robot maju, jadi nilainya NAIK
-    cepat di sepanjang jendela. Nilai yang naik = bukan dinding samping, walau
-    rata-ratanya mirip (180-290 vs dinding asli 240-800)."""
+    cepat di sepanjang jendela dan jatuh di 125-165 (maks teramati ~290).
+    Dinding asli yang sedang dikoreksi ke tengah juga bisa terlihat naik (240-340),
+    jadi nilai naik yang > AMBIGUOUS_MIN tak bisa dibedakan.
+    Kesalahan TIDAK simetris: salah baca 'terbuka' bisa membuat robot berbelok
+    ke dinding (busur macet, pelacakan posisi rusak), salah baca 'dinding' hanya
+    menutup satu pilihan. Jadi yang ambigu dianggap DINDING."""
     n = len(values)
     mean = sum(values) / n
+    if mean <= SIDE_LATE_MIN:
+        return False
     rising = False
     if n >= 4:
         h = n // 2
         first = sum(values[:h]) / h
         last = sum(values[-h:]) / h
         rising = last > RISING_RATIO * first
-    if rising and mean > SIDE_LATE_MIN and mean < AMBIGUOUS_MAX and other_mean > VERY_CLOSE_WALL:
-        # Robot sangat miring ke sisi lawan, jadi dinding sisi ini yang SUNGGUHAN pun
-        # terbaca kecil dan naik (robot sedang dikoreksi ke tengah): sama dengan
-        # sinar lolos ke dinding depan sel tetangga. Tak bisa dibedakan -> anggap
-        # dinding (aman: tidak akan belok ke dinding; pembacaan normal bisa menimpa).
+    if not rising:
         return True
-    return mean > SIDE_LATE_MIN and not rising
+    if conservative:
+        # zona ambigu (140-330, naik): tak bisa dibedakan -> None = "belum tahu";
+        # search_run lalu memverifikasi lewat putar di tempat + FL/FR sebelum belok ke sana
+        return True if mean >= AMBIGUOUS_MAX else None
+    # Seimbang: nilai naik yang ambigu dianggap dinding hanya kalau sisi lawan
+    # sangat dekat (robot sangat miring, jadi dinding sisi ini memang terbaca kecil
+    # dan naik karena dikoreksi); selain itu dianggap sinar yang lolos (terbuka).
+    return AMBIGUOUS_MIN < mean < AMBIGUOUS_MAX and other_mean > VERY_CLOSE_WALL
 
 
-def _early_observation(got, key_side, key_front, side_threshold=SIDE_THRESHOLD, late=False):
+def _early_observation(got, key_side, key_front, side_threshold=SIDE_THRESHOLD, late=False,
+                       conservative=False):
     out = {"front": None, "left": None, "right": None,
            "front_value": None, "left_value": None, "right_value": None}
     front = got.get(key_front) or []
@@ -759,11 +827,17 @@ def _early_observation(got, key_side, key_front, side_threshold=SIDE_THRESHOLD, 
         ml = sum(x[2] for x in side) / len(side)
         mr = sum(x[3] for x in side) / len(side)
         if late:
-            out["left"] = _side_wall_late([x[2] for x in side], mr)
-            out["right"] = _side_wall_late([x[3] for x in side], ml)
+            out["left"] = _side_wall_late([x[2] for x in side], mr, conservative)
+            out["right"] = _side_wall_late([x[3] for x in side], ml, conservative)
         else:
             out["left"], out["right"] = ml > side_threshold, mr > side_threshold
         out["left_value"], out["right_value"] = ml, mr
+        es = []
+        if ml > E_EST_MIN:
+            es.append(HALF_LANE - (SENSOR_LAT + SIN45 * _sensor_distance(ml)))
+        if mr > E_EST_MIN:
+            es.append((SENSOR_LAT + SIN45 * _sensor_distance(mr)) - HALF_LANE)
+        out["e_est"] = sum(es) / len(es) if es else None   # m, + = robot di kiri tengah lorong
         out["left_seq"] = [round(x[2]) for x in side]
         out["right_seq"] = [round(x[3]) for x in side]
     return out
@@ -772,7 +846,39 @@ def _early_observation(got, key_side, key_front, side_threshold=SIDE_THRESHOLD, 
 last_blocked = None   # info henti darurat terakhir (untuk validasi)
 
 
-def search_run(on_cell, on_blocked=None):
+def _rotate_by(delta):
+    """Putar di tempat sebesar delta rad (+ = kiri) relatif arah acuan."""
+    global target_yaw
+    target_yaw += delta
+    while True:
+        err = target_yaw - yaw
+        if abs(err) <= TURN_TOL:
+            break
+        w = math.copysign(min(TURN_SPEED, max(TURN_MIN, TURN_GAIN * abs(err))), err)
+        set_wheels(-w, w)
+        step()
+    settle()
+
+
+def _lateral_nudge(shift):
+    """Geser robot ke samping sejauh shift m (+ = kiri) tanpa mengubah arah akhir
+    dan posisi sepanjang sumbu: putar NUDGE_ANGLE menjauhi arah geser, mundur
+    sejauh shift/sin(sudut) (belakang lorong terbuka), putar kembali, maju
+    sejauh komponen sumbunya. Dipakai sebelum putar di tempat di lorong sempit:
+    radius putar PCB ~66 mm di lorong berjari 84 mm hanya menyisakan 18 mm."""
+    psi = -NUDGE_ANGLE if shift > 0 else NUDGE_ANGLE
+    d = abs(shift) / math.sin(NUDGE_ANGLE)
+    _rotate_by(psi)
+    _drive(-d)
+    settle()
+    _rotate_by(-psi)
+    _drive(d * math.cos(NUDGE_ANGLE))
+    settle()
+    log(f"geser lateral {shift * 1000:+.0f} mm sebelum putar di tempat")
+
+
+def search_run(on_cell, on_blocked=None, late_arc_with_front=True, conservative_sides=False,
+               on_verify=None):
     """Jelajah tanpa berhenti di tiap sel. Mulai di tengah sel dan diam,
     menghadap arah gerak. Di titik keputusan tiap sel C yang dimasuki,
     on_cell(obs) dipanggil dengan dinding C yang teramati
@@ -829,7 +935,8 @@ def search_run(on_cell, on_blocked=None):
             v_in = 0.0
             prev_before = None
             continue
-        obs = _early_observation(got, ("side", 0), ("front", 0), SIDE_THRESHOLD, late)
+        obs = _early_observation(got, ("side", 0), ("front", 0), SIDE_THRESHOLD, late,
+                                 conservative_sides)
         obs["late"] = late
         cells += 1
         action = on_cell(obs)
@@ -839,7 +946,13 @@ def search_run(on_cell, on_blocked=None):
             to_center = (to_center - s_dec) + CELL
             v_in = V_SEARCH
             continue
-        if action in ("L", "R") and _arc_shape(before) is not None:
+        # Busur di sel "terlambat" yang berputar karena ada dinding depan lewat sangat
+        # dekat dinding itu (terukur ~10 mm, normal 22-29 mm) dan bisa macet.
+        # late_arc_with_front=False: di situ berhenti dan putar di tempat saja.
+        side_unknown = ((action == "L" and obs.get("left") is None)
+                        or (action == "R" and obs.get("right") is None))   # sisi ambigu: jangan busur
+        arc_ok = not (late and obs.get("front") and not late_arc_with_front) and not side_unknown
+        if action in ("L", "R") and arc_ok and _arc_shape(before) is not None:
             # busur dimulai `before` m sebelum tengah sel dan berakhir tepat di
             # tengah sisi sel (bentuk disesuaikan, titik akhir tetap di tengah
             # lorong sel berikutnya, juga di sel "terlambat")
@@ -856,14 +969,37 @@ def search_run(on_cell, on_blocked=None):
         settle()
         if action == "STOP":
             return cells
+        e_est = obs.get("e_est")
+        if e_est is not None and NUDGE_MIN < abs(e_est) <= NUDGE_MAX:
+            _lateral_nudge(-e_est)
         if action in ("L", "R"):
             _point_turn("left" if action == "L" else "right")
+            if stop_back > 0.005:
+                # berhenti stop_back lebih awal sepanjang arah LAMA: setelah diputar
+                # selisih itu jadi galat lateral (kiri bila belok kiri); geser kembali
+                # supaya jalur berikutnya tidak lewat dekat dinding.
+                _lateral_nudge(-stop_back if action == "L" else stop_back)
+            if side_unknown and on_blocked:
+                # Sisi tujuan ambigu: lihat dinding depan (arah baru) dari tengah sel
+                # dengan FL/FR yang andal. Kalau dinding, laporkan dan pilih aksi lain.
+                front_wall, _ = read_front_wall()
+                if on_verify:
+                    on_verify(front_wall)
+                if front_wall:
+                    log("VERIFIKASI: sisi ambigu ternyata dinding, aksi dipilih ulang")
+                    action2 = on_blocked()
+                    if action2 in ("L", "R"):
+                        _point_turn("left" if action2 == "L" else "right")
+                    elif action2 == "U":
+                        _point_turn("left")
+                        _point_turn("left")
+            to_center = CELL
         elif action == "U":
             _point_turn("left")
             _point_turn("left")
+            to_center = CELL - stop_back   # sesudah putar balik robot stop_back di DEPAN tengah sel
         else:
             raise ValueError(f"aksi tidak dikenal: {action}")
-        to_center = CELL
         v_in = 0.0
 
 

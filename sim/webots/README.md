@@ -19,6 +19,7 @@ sim/webots/
       micromouse_practice8x8.wbt   dari training/practice-8x8-a.txt; controller
                                    wall_test (uji pembacaan dinding)
       micromouse_floodfill.wbt     practice-8x8-a; controller floodfill
+      micromouse_qlearning.wbt     practice-8x8-a; controller qlearning
     meshes/                    model 3D Tinkercad + potongan per warna (parts/)
     controllers/
       micromouse_controller/
@@ -30,6 +31,8 @@ sim/webots/
         wall_test.py               uji baca dinding di practice-8x8-a
       floodfill/
         floodfill.py               flood fill: jelajah dengan sensor + lari cepat
+      qlearning/
+        qlearning.py               Q-learning tabular di atas search_run + lari cepat
 ```
 
 ## Cara membuka
@@ -144,9 +147,16 @@ sim/webots/
   samping sampai 0 mm); sekarang kalau ada dinding depan robot berhenti
   `SAFE_STOP_NOSE + PCB_FRONT_AHEAD - HALF_LANE` = 19 mm LEBIH AWAL (tepi PCB
   37 mm dari dinding), putar di tempat tersisa jarak bebas 17-23 mm di
-  sebagian besar jalan buntu. Masih ada satu kasus macet 6 s (jalan buntu
-  (8,0), galat lateral ~23 mm saat tiba): lorong 168 mm dengan radius putar PCB
-  ~66 mm hanya menyisakan 18 mm toleransi lateral. Strip tabrakan kubah depan
+  sebagian besar jalan buntu. Kasus macet 6 s (sel (8,0): galat lateral ~22 mm
+  saat tiba; lorong 168 mm dengan radius putar PCB ~66 mm hanya menyisakan 18
+  mm toleransi lateral) diperbaiki dengan **geser lateral** (`_lateral_nudge`)
+  sebelum putar di tempat bila |galat| > 10 mm (galat dari nilai DL/DR di
+  jendela keputusan, `e_est`): putar 15 derajat menjauhi arah geser, mundur
+  sejauh galat/sin(15), putar kembali, maju lagi (posisi sumbu dan arah akhir
+  tidak berubah). Jarak bebas diam terkecil sekarang 10.6 mm (saat memutar 15
+  derajat) dan >= 15.9 mm sesudahnya. Pemusatan DL/DR juga dimatikan bila
+  FL/FR melihat dinding depan dekat (nilai > 400), karena di jarak itu sinar
+  DL/DR mengenai dinding DEPAN dan galat lateralnya palsu. Strip tabrakan kubah depan
   dinaikkan 7 -> 24 supaya outline simulasi lebih dekat ke outline PCB.
   **Keterbatasan:** keputusan samping di sel terlambat bergantung pada pola nilai
   sensor dan ambang yang dikalibrasi ke kurva perkiraan; pada robot asli
@@ -156,6 +166,51 @@ sim/webots/
   tengah sel dan diputar 180 derajat di tempat. Tidak ada deteksi macet.
   `MM_MAZE=<file>` memilih labirin lain (generate dunianya dari file yang
   sama), `MM_MAX_TRIPS` membatasi jumlah perjalanan.
+- **Q-learning (`controllers/qlearning/qlearning.py`, dunia
+  `micromouse_qlearning.wbt`)**: algoritma yang sama dengan
+  `sim/algorithms/q-learning` (state (x,y), aksi N/E/S/W yang tidak
+  berdinding menurut sensor, reward -1 per langkah dan +100 di tujuan,
+  alpha 0.3, gamma 0.95, epsilon 1.0 turun x0.99 per episode, early stopping
+  patience 100), dijalankan di atas `search_run` (gerak mulus, belok halus,
+  pengaman). Beda dengan versi `mms`: antar episode robot DIPINDAHKAN ke start
+  lewat Supervisor (bukan pulang membalik jalur), batas langkah per episode
+  `MM_MAX_STEPS` (400, bukan 4*w*h; tiap langkah ~1 s simulasi), arah balik
+  hanya dipilih di jalan buntu. Hasil di
+  practice-8x8-a (`MM_SEED=7`, setelah perbaikan di bawah): early stopping di
+  episode 139, jalur 22 langkah (optimal) pertama kali di episode 39, 0
+  saturasi roda, 0 rem darurat, 0 busur gagal; episode greedy sesudahnya 24
+  langkah (Q belum konvergen penuh, sama seperti sebagian seed di versi
+  `mms`), lari cepat dari jalur tanpa loop 24 langkah 16.9 s sampai tujuan.
+  Uji 25 episode: seed 2 24/25 berhasil, seed 3 25/25, seed 4 25/25.
+  **Perbaikan keandalan yang dipicu peringatan `requested velocity ...
+  exceeds 'maxVelocity'` di console:** (1) peringatan itu berasal dari belok
+  halus yang TERTAHAN dinding (galat arah 20-30 derajat memerintahkan roda
+  luar >31.4 rad/s): `set_wheels` kini menskala KEDUA roda bersama dan mencatat
+  `SATURASI` ke `run_log.txt`; (2) penyebab tertahannya: eksplorasi acak
+  memilih belok ke sisi yang salah baca atau busur di sel terlambat dekat
+  dinding depan (jarak bebas ~10 mm) -- `search_run(late_arc_with_front=False)`
+  berhenti dan putar di tempat bila ada dinding depan; (3) sisi ambigu di sel
+  terlambat (`conservative_sides=True`) dibaca None dan DIVERIFIKASI: robot
+  berhenti, berputar ke sana, membaca dinding depan dengan FL/FR yang andal,
+  dan memilih ulang bila dinding (`on_verify`/`on_blocked`); sebelumnya
+  ambigu=dinding membuat jalan yang sah tertutup selamanya dan episode
+  berputar di tempat; (4) bug pelacakan: sesudah verifikasi gagal, pilihan
+  terakhir adalah kebalikan arah MASUK sel (bukan kebalikan arah yang diblokir,
+  yang bisa dinding lain); (5) batas waktu busur/lurus (`StallError`) supaya
+  gerak yang tertahan tidak menggantung selamanya (episode dihitung gagal dan
+  robot dipindah ke start); (6) kompensasi lateral sesudah berhenti 19 mm lebih
+  awal lalu putar di tempat; (7) cek arah sesudah busur (`BUSUR GAGAL`). Variabel:
+  `MM_EPISODES`, `MM_PATIENCE`, `MM_MAX_STEPS`, `MM_EPS_DECAY`, `MM_ALPHA`,
+  `MM_GAMMA`, `MM_SEED`, `MM_MAZE`. Console Webots dibuat sama dengan versi
+  `mms` ("Ukuran maze: 16x16", `[Episode n/N] sampai tujuan dalam ... langkah,
+  reward=..., epsilon=..., terbaik=...`, "Early stopping: ...", "Training
+  selesai. Run akhir (greedy, tanpa eksplorasi)...", "Run akhir sampai tujuan
+  dalam ... langkah."); log gerak pustaka dan keterangan tambahan (waktu
+  simulasi, jalur tanpa loop, lari cepat) hanya ke `run_log.txt`
+  (`LOG_TO_CONSOLE` di pustaka). Keluaran (diabaikan git):
+  `controllers/qlearning/episode_log.csv` dan `qtable_state.pkl`. Pengaman
+  hanya untuk dinding depan: kalau pembacaan samping salah, robot bisa
+  menyenggol dinding.
 - **Pemusatan lateral dengan DL/DR (PID bertingkat, `CENTER_*`)**: di jalur
   lurus, galat lateral e (m, + = robot di kiri tengah lorong) dihitung dari
   jarak sinar DL/DR ke dinding (kebalikan kurva respons sensor; dua dinding:

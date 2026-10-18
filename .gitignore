@@ -13,3 +13,7 @@ sim/webots/**/*.wbproj
 
 # Log hasil run controller (run_log.txt), dibuat ulang tiap kali disimulasikan.
 sim/webots/**/run_log.txt
+
+# Keluaran training Q-learning di Webots (dibuat ulang tiap run).
+sim/webots/**/qlearning/episode_log.csv
+sim/webots/**/qlearning/qtable_state.pkl
