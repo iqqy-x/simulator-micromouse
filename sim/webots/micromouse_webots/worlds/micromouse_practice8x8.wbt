@@ -2955,5 +2955,5 @@ Robot {
     centerOfMass [ 0 0 -0.004 ]
   }
   supervisor TRUE
-  controller "micromouse_controller"
+  controller "wall_test"
 }

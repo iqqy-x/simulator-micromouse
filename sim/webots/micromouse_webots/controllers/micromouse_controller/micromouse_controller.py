@@ -49,9 +49,25 @@ HEADING_KP = 10.0    # rad/s roda per radian error arah saat maju lurus
 
 SETTLE_STEPS = 6     # langkah tunggu setelah berhenti supaya robot diam
 
-# Sensor PCB: FL/FR menghadap depan, DL/DR diagonal 45 derajat. Ambang
-# dinding BELUM ada -- tunggu kalibrasi dari nilai mentah di run_log.txt.
+# Sensor PCB: FL/FR menghadap depan, DL/DR diagonal 45 derajat ke luar.
 SENSOR_NAMES = ("ds_fl", "ds_fr", "ds_dl", "ds_dr")
+
+# Pembacaan dinding (nilai sensor ~ADC 12-bit, kurva respons masih perkiraan).
+# Dinding DEPAN: FL/FR saat robot berhenti di tengah sel. Dinding ada ->
+# ~36 mm dari sensor (nilai ~2100); tidak ada -> dinding berikutnya >200 mm
+# (nilai <60). Ambang di tengah-tengah dengan margin besar.
+FRONT_THRESHOLD = 800.0
+FRONT_SAMPLES = 5
+# Dinding SAMPING: DL/DR menghadap diagonal 45 derajat dan dipasang di depan
+# (+-9.5 mm dari sumbu, 60 mm di depan poros roda), jadi dari tengah sel
+# sinarnya mengenai dinding samping sel DI DEPAN. Sinar baru mengenai dinding
+# samping sel yang SEDANG dimasuki kalau robot ~135 mm sebelum tengah sel
+# (45 mm setelah meninggalkan tengah sel sebelumnya). Karena itu DL/DR
+# disampel saat bergerak di jendela jarak tempuh itu. Dinding ada -> sinar
+# ~105 mm (nilai ~400); tidak ada -> sinar keluar sel, >250 mm (nilai 0).
+SIDE_SAMPLE_AT = 0.045   # m jarak tempuh dari tengah sel sebelumnya
+SIDE_WINDOW = 0.040      # m lebar jendela (rata-rata semua sampel di dalamnya)
+SIDE_THRESHOLD = 200.0
 
 log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_log.txt")
 log_file = open(log_path, "w", encoding="utf-8")
@@ -129,17 +145,32 @@ def read_sensors():
     return values
 
 
+last_side_walls = None   # (kiri, kanan) sel terakhir yang dimasuki, atau None
+last_side_values = None  # nilai rata-rata DL/DR di jendela sampel (untuk kalibrasi)
+
+
 def drive_forward_cells(n=1):
     """Maju N sel lurus. Jarak dari rata-rata rotasi roda (encoder), arah
     dijaga lewat gyro, kecepatan dihaluskan (ramp naik, melambat mendekati
-    target) supaya roda tidak slip."""
+    target) supaya roda tidak slip.
+
+    Sambil jalan, DL/DR disampel untuk dinding kiri/kanan tiap sel yang
+    dimasuki (lihat SIDE_*). Return: daftar (kiri, kanan) satu per sel."""
+    global last_side_walls, last_side_values
     target = n * CELL / WHEEL_R
     l0, r0 = left_enc.getValue(), right_enc.getValue()
     speed = 0.0
     avg = 0.0
+    side_samples = [[] for _ in range(n)]  # per sel: daftar (DL, DR)
 
     while True:
         avg = ((left_enc.getValue() - l0) + (right_enc.getValue() - r0)) / 2.0
+        travelled = avg * WHEEL_R
+        for k in range(n):
+            lo = k * CELL + SIDE_SAMPLE_AT - SIDE_WINDOW / 2.0
+            if lo <= travelled <= lo + SIDE_WINDOW:
+                side_samples[k].append((sensors["ds_dl"].getValue(),
+                                        sensors["ds_dr"].getValue()))
         remaining = target - avg
         if remaining <= STOP_TOL:
             break
@@ -154,6 +185,39 @@ def drive_forward_cells(n=1):
     dr = right_enc.getValue() - r0
     log(f"maju {n} sel: target={target:.3f} rad, tercapai={avg:.3f} rad "
         f"(kiri={dl:.3f}, kanan={dr:.3f}), yaw={math.degrees(yaw):.1f}")
+
+    result = []
+    for samples in side_samples:
+        if not samples:
+            raise RuntimeError("jendela sampel DL/DR kosong -- naikkan SIDE_WINDOW")
+        mean_l = sum(s[0] for s in samples) / len(samples)
+        mean_r = sum(s[1] for s in samples) / len(samples)
+        result.append((mean_l > SIDE_THRESHOLD, mean_r > SIDE_THRESHOLD, mean_l, mean_r))
+    last_side_walls = (result[-1][0], result[-1][1])
+    last_side_values = (result[-1][2], result[-1][3])  # nilai rata-rata, untuk log/kalibrasi
+    return [(r[0], r[1]) for r in result]
+
+
+def read_front_wall():
+    """Dinding di depan sel tempat robot berdiri (robot harus di tengah sel).
+    Rata-rata FL dan FR dari beberapa langkah. Return (ada_dinding, nilai)."""
+    total = 0.0
+    for _ in range(FRONT_SAMPLES):
+        step()
+        total += (sensors["ds_fl"].getValue() + sensors["ds_fr"].getValue()) / 2.0
+    value = total / FRONT_SAMPLES
+    return value > FRONT_THRESHOLD, value
+
+
+def sense_walls():
+    """Dinding sel sekarang: dict front/left/right (relatif arah hadap).
+    Depan dibaca sekarang; kiri/kanan berasal dari lintasan masuk sel ini
+    (drive_forward_cells), jadi hanya sah tepat setelah masuk, sebelum
+    belok. Setelah belok, depan baru tetap bisa dibaca dengan
+    read_front_wall(). Sel start: kiri/kanan belum diketahui (None)."""
+    front, _ = read_front_wall()
+    left, right = last_side_walls if last_side_walls else (None, None)
+    return {"front": front, "left": left, "right": right}
 
 
 def turn(direction):

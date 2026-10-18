@@ -182,41 +182,42 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   sama dengan `sim/mazes/mazefiles/`, dipakai juga `flood-fill-c`/`astar-c`)
   menjadi dunia Webots (`.wbt`). Dimensi sel/dinding diambil dari
   `docs/micromouse-rules.md` (classic 18cm / halfsize 9cm).
-- Robot didefinisikan LANGSUNG di dalam `.wbt` yang di-generate (bukan
-  PROTO terpisah) — sengaja disederhanakan untuk draft pertama. 2 roda
-  (`HingeJoint`+`RotationalMotor`, mode kecepatan via `setPosition(inf)`)
-  + 1 "skid" (bola licin) sebagai titik tumpu ketiga, dan 3
-  `DistanceSensor` (depan, kiri-diagonal, kanan-diagonal) meniru sensor IR
-  reflektif (`TEFT4300+SFH4545`) yang dipakai di board asli.
-- `controllers/micromouse_controller/micromouse_controller.py`: sekarang
-  berisi primitif gerak `drive_forward_cells(n)` dan `turn("left"/"right")`
-  yang pakai feedback encoder (`PositionSensor` di tiap roda, radian
-  kumulatif) untuk presisi, bukan kecepatan+waktu tebakan — ini layer
-  kendali rendah yang nanti dipanggil planner (flood-fill/A*/Q-table,
-  format sama dengan versi mms) alih-alih moveForward/turnLeft/turnRight.
-  Belum ada fungsi baca-dinding dari sensor (pengganti wallFront/Left/
-  Right versi mms) dan belum ada port algoritma sungguhan — baru urutan
-  uji primitif manual.
-- **Status (divalidasi bertahap oleh user, bukan oleh saya — tidak ada GUI
-  Webots di sesi ini)**:
-  - Fisika dasar (roda, body, maju lurus, berhenti sebelum nabrak) —
-    **sudah dites jalan**. Sempat ada bug: `Cylinder` roda diberi rotasi
-    tambahan yang tidak perlu sehingga sumbu putarnya tidak sejajar
-    `HingeJoint`-nya (roda "rebah", bukan berdiri) — sudah diperbaiki
-    (rotasi itu dihapus dari `maze_to_webots.py`).
-  - Primitif `drive_forward_cells`/`turn` — **divalidasi lewat
-    `run_log.txt`** (urutan uji maju-kanan-maju-kiri-maju): semua "maju 1
-    sel" dalam <0.1% dari target (11.259-11.260 vs 11.250 rad), kedua
-    belokan <1% dari target (3.167 vs 3.142 rad). Tidak ada undershoot
-    (tanda nabrak) di sepanjang satu-satunya jalur yang bebas tabrakan di
-    maze itu → arah belok kemungkinan besar sudah benar, tapi ini
-    inferensi dari data encoder, BUKAN konfirmasi visual langsung.
-  - Sensor kiri/kanan dipasang **diagonal ~35° ke depan** (bukan tegak
-    lurus 90°, meniru tata letak sensor micromouse asli) — jadi BUKAN
-    pengganti langsung `wallLeft()`/`wallRight()` versi mms yang instan
-    ya/tidak persis di sisi, perlu interpretasi beda nanti.
-  - Lihat `sim/webots/README.md` untuk daftar lengkap yang mungkin perlu
-    disetel user (kalibrasi sensor, gesekan, dll).
+- Webots di sini adalah **lingkungan micromouse umum** (bukan khusus satu
+  algoritma). Robot didefinisikan LANGSUNG di `.wbt` yang di-generate,
+  mengikuti desain PCB (`hardware/PickAndPlace_MICE_PCB_2026_10_18.xlsx`
+  + `image.png`): roda N20 34x7 mm, jarak antar roda 73 mm, body disusun
+  dari strip kotak mengikuti outline PCB, 4 `DistanceSensor` (FL/FR depan,
+  DL/DR diagonal 45°, di pusat casing 3D — bukan pad footprint), `Gyro`
+  (MPU6050), 1 skid. Pusat massa diset eksplisit (`ROBOT_COM_Z`), sensor
+  tipe `generic` (BUKAN `infra-red`, yang memodulasi nilai oleh warna/jarak).
+- `controllers/micromouse_controller/micromouse_controller.py` = pustaka
+  gerak + sensor: `drive_forward_cells(n)` (jarak encoder, arah dijaga
+  gyro), `turn("left"/"right")` (sudut gyro, arah acuan mutlak),
+  `read_front_wall()`, `sense_walls()`. Planner apa pun cukup memanggil ini
+  alih-alih moveForward/turnLeft/turnRight versi mms.
+- **Pembacaan dinding**: dinding depan dari FL/FR di tengah sel; dinding
+  kiri/kanan dari DL/DR yang disampel SAAT BERGERAK (jarak tempuh 45 mm
+  setelah tengah sel sebelumnya), karena sinar diagonal dari tengah sel
+  mengenai sel di depan. Sel start: kiri/kanan tak bisa dibaca dari tengah
+  (pindai dengan berputar + `read_front_wall()`).
+- `controllers/wall_test/wall_test.py` (controller dunia
+  `micromouse_practice8x8.wbt`): menyusuri jalur BFS di practice-8x8-a dan
+  membandingkan dinding terbaca vs file maze. Hasil uji headless 70/70
+  benar (depan 2001-2222 vs kosong 0-39; samping 397-454 vs kosong 0-30).
+  Kurva respons sensor masih PERKIRAAN — ganti dengan hasil ukur asli.
+- **Status** (diuji headless lewat `webots.exe --batch --no-rendering
+  --mode=fast`; controller berupa Supervisor sehingga posisi SEBENARNYA
+  tercatat di `run_log.txt` untuk validasi, tidak dipakai navigasi):
+  - `Cylinder` di Webots R2025a (ENU) bersumbu **Z**: roda harus diputar 90°
+    di sumbu X agar sejajar `HingeJoint`. Pusat massa default (dihitung dari
+    bounding object) bergeser ke depan, skid menanggung beban, roda slip:
+    belok di tempat hanya memutar 59 dari 90°. Sudah diperbaiki.
+  - Gerak: 10 putaran pulang-pergi (36 belokan) berakhir ~2 mm dari titik
+    awal, arah meleset <1°. Belum dikonfirmasi visual oleh user di GUI.
+  - Dunia butuh `Background`/`DirectionalLight` bawaan (bukan
+    `TexturedBackground`, PROTO-nya harus diunduh dari GitHub).
+  - Lihat `sim/webots/README.md` untuk daftar asumsi yang perlu disetel
+    user (kurva sensor, tinggi PCB/sensor, massa, dll).
 - **Rencana aktif: ganti body/roda placeholder (Box/Cylinder) dengan mesh
   3D robot asli user** — file `.obj` per-bagian (body, roda kiri, roda
   kanan) hasil export Tinkercad. `maze_to_webots.py` perlu diubah untuk

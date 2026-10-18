@@ -7,6 +7,7 @@ diambil dari desain PCB (hardware/PickAndPlace_MICE_PCB_2026_10_18.xlsx).
 
 Cara pakai:
     python maze_to_webots.py <maze.txt> <output.wbt> [--category classic|halfsize]
+                             [--controller NAMA]   (bawaan: micromouse_controller)
 
 Dimensi mengikuti docs/micromouse-rules.md:
     classic : sel 18x18 cm, dinding tinggi 5 cm, tebal 1.2 cm
@@ -305,7 +306,7 @@ def body_nodes(visual):
     return "\n".join(nodes)
 
 
-def generate_robot(cell):
+def generate_robot(cell, controller="micromouse_controller"):
     skid_r = 0.006
     sensors = "\n".join(sensor_node(n, s) for n, s in SENSORS_PCB.items())
     # MPU6050 di PCB (40, 70.75): gyro sumbu Z dipakai untuk sudut belok dan
@@ -357,7 +358,7 @@ def generate_robot(cell):
     centerOfMass [ 0 0 {ROBOT_COM_Z} ]
   }}
   supervisor TRUE
-  controller "micromouse_controller"
+  controller "{controller}"
 }}"""
 
 
@@ -376,7 +377,10 @@ def main():
 
     width, rows, horiz, vert = parse_maze(maze_path)
     walls = generate_walls(width, rows, horiz, vert, cell, wall_h, wall_t)
-    robot = generate_robot(cell)
+    controller = "micromouse_controller"
+    if "--controller" in sys.argv:
+        controller = sys.argv[sys.argv.index("--controller") + 1]
+    robot = generate_robot(cell, controller)
 
     floor_w, floor_h = width * cell, rows * cell
 

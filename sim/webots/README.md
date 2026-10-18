@@ -15,12 +15,16 @@ sim/webots/
   micromouse_webots/         project Webots (buka worlds/micromouse.wbt di Webots)
     worlds/
       micromouse.wbt          hasil generate dari maze training/minimaze.txt
-      micromouse_practice8x8.wbt   dari training/practice-8x8-a.txt
+      micromouse_practice8x8.wbt   dari training/practice-8x8-a.txt; controller
+                                   wall_test (uji pembacaan dinding)
     controllers/
       micromouse_controller/
-        micromouse_controller.py   primitif gerak (maju N sel / belok 90 derajat
-                                    pakai feedback encoder) + urutan uji coba
+        micromouse_controller.py   pustaka: gerak (maju N sel: encoder + gyro;
+                                    belok 90 derajat: gyro), pembacaan dinding,
+                                    + urutan uji gerak bila dijalankan langsung
         run_log.txt                 (dibuat otomatis tiap run, gitignored)
+      wall_test/
+        wall_test.py               uji baca dinding di practice-8x8-a
 ```
 
 ## Cara membuka
@@ -47,6 +51,15 @@ sim/webots/
   kiri x2, maju, belok kanan x2 = 40 belokan) berakhir 2 mm dari titik awal
   dan arah meleset <1 derajat -- tidak menumpuk karena tiap belok
   menambah +-90 derajat ke arah acuan dan saat maju yaw dikoreksi ke acuan.
+- **Pembacaan dinding (`sense_walls()`, `read_front_wall()`) divalidasi
+  70/70 benar** di practice-8x8-a (`wall_test`: robot menyusuri jalur
+  terpendek 22 langkah; dinding terbaca hanya dari sensor, dibandingkan
+  dengan file maze). Depan: FL/FR di tengah sel (dinding 2001-2222, kosong
+  0-39, ambang 800). Samping: DL/DR disampel SAAT BERGERAK di jarak tempuh
+  45 mm setelah tengah sel sebelumnya (dinding 397-454, kosong 0-30, ambang
+  200). Sel start tidak bisa dibaca sisinya dari tengah sel -- pindai dengan
+  berputar dan `read_front_wall()`. Margin ini hanya berlaku untuk kurva
+  sensor perkiraan; ulangi uji setelah kurva diganti hasil ukur asli.
 - **Robot kini mengikuti desain PCB** (`hardware/PickAndPlace_MICE_PCB_2026_10_18.xlsx`),
   bukan placeholder lagi: 4 sensor (`ds_fl`, `ds_fr` menghadap depan di x=+-30 mm,
   `ds_dl`, `ds_dr` diagonal 45 derajat dekat tengah), roda 34x7 mm, jarak antar
@@ -105,9 +118,9 @@ Tambahkan `--category halfsize` untuk maze 32x32 (dimensi sel 9 cm).
 ## Rencana selanjutnya (belum dikerjakan)
 
 - Ganti body/roda placeholder dengan mesh 3D asli (lihat bagian di atas).
-- Kalibrasi ambang dinding dari nilai mentah 4 sensor (`read_sensors()` kini
-  hanya mencatat nilai mentah ke `run_log.txt`), lalu tulis fungsi baca dinding
-  yang menggantikan `wallFront()`/`wallLeft()`/`wallRight()` versi mms.
+- Ganti kurva respons sensor perkiraan dengan hasil ukur TEFT4300+SFH4545
+  asli, lalu ulangi `wall_test` (ambang `FRONT_THRESHOLD`/`SIDE_THRESHOLD`
+  di `micromouse_controller.py` mungkin perlu disesuaikan).
   Webots di sini adalah lingkungan micromouse umum (bukan khusus satu
   algoritma): planner apa pun cukup memanggil `drive_forward_cells`/`turn`
   alih-alih moveForward/turnLeft/turnRight.
