@@ -12,11 +12,13 @@ real-time).
 sim/webots/
   tools/
     maze_to_webots.py        konverter: file maze ASCII -> dunia Webots (.wbt)
+    split_obj_by_material.py memecah .obj Tinkercad per warna (untuk meshes/parts/)
   micromouse_webots/         project Webots (buka worlds/micromouse.wbt di Webots)
     worlds/
       micromouse.wbt          hasil generate dari maze training/minimaze.txt
       micromouse_practice8x8.wbt   dari training/practice-8x8-a.txt; controller
                                    wall_test (uji pembacaan dinding)
+    meshes/                    model 3D Tinkercad + potongan per warna (parts/)
     controllers/
       micromouse_controller/
         micromouse_controller.py   pustaka: gerak (maju N sel: encoder + gyro;
@@ -92,8 +94,8 @@ sim/webots/
   setelah 36 belokan). Pivot belum dikoreksi sensor.
 - **Robot kini mengikuti desain PCB** (`hardware/PickAndPlace_MICE_PCB_2026_10_18.xlsx`),
   bukan placeholder lagi: 4 sensor (`ds_fl`, `ds_fr` menghadap depan di x=+-30 mm,
-  `ds_dl`, `ds_dr` diagonal 45 derajat dekat tengah), roda 34x7 mm, jarak antar
-  roda 73 mm, motor maks 31.4 rad/s (N20 300 RPM). Emitter dan penerima tiap
+  `ds_dl`, `ds_dr` diagonal 45 derajat dekat tengah), roda 29x8.6 mm (dari model 3D), jarak antar
+  pusat roda 74.6 mm, motor maks 31.4 rad/s (N20 300 RPM). Emitter dan penerima tiap
   pasangan dipasang tumpang tindih di casing 3D di atas kotak arsir kuning di
   PCB, jadi posisi sensor = pusat kotak itu (bukan pad footprint): FL/FR di
   (x=+-30, depan 47.5 mm) menghadap lurus, DL/DR di (x=+-9.5, depan 60.1 mm)
@@ -109,32 +111,46 @@ sim/webots/
 - **Outline body** diukur dari `hardware/image.png` (+-0.5 mm): 80 x 94.9 mm,
   sudut atas bulat radius 35 mm, takik roda di y_pcb 14.6-43.2. Body disusun
   dari strip kotak mengikuti outline itu (`body_blocks()`).
+- **Dari model 3D (`meshes/`, diukur dari titik-titiknya):** roda diameter
+  29 mm x lebar 8.6 mm (bukan 34x7), pusat roda 74.6 mm, poros 14 mm dari
+  lantai; bidang bawah PCB 6.5 mm dari lantai, komponen tertinggi ~22.5 mm
+  (ditambah satu benda kecil setinggi 52 mm yang diabaikan untuk tabrakan);
+  casing sensor membentang 8-18 mm, jadi pusat pasangan sensor ~13.5 mm dari
+  lantai (bukan 5 mm). Posisi casing sensor di model cocok dengan perhitungan
+  dari kotak arsir PCB (selisih <0.5 mm).
 - **Dugaan, belum dikalibrasi:** kurva respons sensor (`SENSOR_D0`, noise 3%; tipe `generic`, BUKAN `infra-red`, karena tipe infra-red memodulasi nilai oleh warna benda dan jarak sehingga kurva tabel tidak terbaca apa adanya),
-  tinggi sensor 5 mm dari lantai, massa 80 g, tinggi body (bawah PCB 10 mm,
-  atas 30 mm dari lantai -- supaya sinar sensor di 5 mm lewat di bawah PCB).
-  Sensor memakai 1 sinar: sinar ganda menyebar ke atas/bawah dan pada tinggi
-  5 mm bisa mengenai lantai. Ganti dengan hasil ukur asli begitu ada.
+  massa 80 g. Sensor memakai 1 sinar: sinar ganda menyebar ke atas/bawah dan
+  bisa mengenai lantai. Ganti dengan hasil ukur asli begitu ada.
 - Kalau robot "menembus" dinding tipis (1.2 cm) di kecepatan tinggi: physics
   engine diskrit tiap `basicTimeStep` (16 ms) bisa tunneling -- kecilkan
   `CRUISE_SPEED`/`TURN_SPEED` atau `basicTimeStep`.
 
-## Rencana: ganti body/roda placeholder dengan model 3D robot asli
+## Model 3D robot (`micromouse_webots/meshes/`)
 
-User punya file `.obj` (export dari Tinkercad, terpisah per bagian: body,
-roda kiri, roda kanan). Rencana integrasinya:
+Model dari Tinkercad dipakai untuk TAMPILAN saja; bentuk fisik (tabrakan)
+tetap kotak/silinder sederhana supaya simulasi cepat dan stabil.
 
-1. File `.obj`/`.mtl` ditaruh di `micromouse_webots/meshes/`.
-2. `maze_to_webots.py` diubah: `Shape { geometry Box {...} }` placeholder
-   body/roda diganti jadi `Shape { geometry Mesh { url "meshes/....obj" } }`,
-   nilai `boundingObject`/massa/posisi sensor disesuaikan dimensi mesh asli
-   (bukan dugaan 0.07x0.07x0.03 m seperti sekarang).
-3. Perlu dicek skala satuan (Tinkercad biasanya ekspor mm, Webots pakai
-   meter) dan titik origin tiap mesh (pusat rotasi roda harus pas di anchor
-   `HingeJoint`) -- lihat OBJ-nya langsung (parsing vertex) untuk estimasi
-   bounding box sebelum pasang skala.
+| File | Isi |
+|---|---|
+| `body.obj/.mtl`, `wheel_left.obj/.mtl`, `wheel_right.obj/.mtl` | file asli dari Tinkercad (satuan mm, Z ke atas, X ke samping, Y ke depan, titik asal x/y = sumbu roda) |
+| `parts/<nama>__<material>.obj` | hasil `tools/split_obj_by_material.py`: satu file per warna |
+| `../images/robot-atas.png`, `robot-samping.png` | contoh tampilan hasil render |
 
-**BELUM dikerjakan** -- menunggu file mesh ditaruh di folder di atas + info
-dimensi nyata/nama file dari user.
+- **Kenapa dipecah per warna:** Webots tidak memakai warna `.mtl` untuk node
+  `Mesh` (hasilnya putih polos). `maze_to_webots.py` membuat satu `Shape`
+  ber-`PBRAppearance` untuk tiap warna dari `Kd` di `.mtl`. Jalankan ulang
+  `python tools/split_obj_by_material.py` kalau model diganti, lalu generate
+  ulang dunia.
+- **Orientasi:** mesh diputar -90 derajat sekitar Z (x_robot = y_mesh,
+  y_robot = -x_mesh), diskala 0.001, dan digeser turun setinggi poros roda
+  mesh. Dicek lewat gambar kamera (tampak atas dan samping).
+- **Dunia memakai mesh kalau `meshes/parts/` ada;** `--no-mesh` memaksa
+  kotak/silinder polos.
+- **Berat:** body 289 ribu segitiga (satu bagian gelap berisi 132 ribu titik)
+  -- Webots menampilkan peringatan "lebih dari 100'000 vertices" dan bayangan
+  dimatikan (`castShadows FALSE`) untuk body. Kalau GUI lambat, kurangi
+  detail di Tinkercad atau pakai `--no-mesh`.
+- Folder `meshes/` ~20 MB (file asli + potongan).
 
 ## Membuat ulang dunia dari maze lain
 
@@ -147,7 +163,6 @@ Tambahkan `--category halfsize` untuk maze 32x32 (dimensi sel 9 cm).
 
 ## Rencana selanjutnya (belum dikerjakan)
 
-- Ganti body/roda placeholder dengan mesh 3D asli (lihat bagian di atas).
 - Ganti kurva respons sensor perkiraan dengan hasil ukur TEFT4300+SFH4545
   asli, lalu ulangi `wall_test` (ambang `FRONT_THRESHOLD`/`SIDE_THRESHOLD`
   di `micromouse_controller.py` mungkin perlu disesuaikan).

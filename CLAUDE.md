@@ -185,7 +185,7 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
 - Webots di sini adalah **lingkungan micromouse umum** (bukan khusus satu
   algoritma). Robot didefinisikan LANGSUNG di `.wbt` yang di-generate,
   mengikuti desain PCB (`hardware/PickAndPlace_MICE_PCB_2026_10_18.xlsx`
-  + `image.png`): roda N20 34x7 mm, jarak antar roda 73 mm, body disusun
+  + `image.png`): roda 29x8.6 mm (dari model 3D), jarak antar pusat roda 74.6 mm, body disusun
   dari strip kotak mengikuti outline PCB, 4 `DistanceSensor` (FL/FR depan,
   DL/DR diagonal 45°, di pusat casing 3D — bukan pad footprint), `Gyro`
   (MPU6050), 1 skid. Pusat massa diset eksplisit (`ROBOT_COM_Z`), sensor
@@ -229,14 +229,15 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
     `TexturedBackground`, PROTO-nya harus diunduh dari GitHub).
   - Lihat `sim/webots/README.md` untuk daftar asumsi yang perlu disetel
     user (kurva sensor, tinggi PCB/sensor, massa, dll).
-- **Rencana aktif: ganti body/roda placeholder (Box/Cylinder) dengan mesh
-  3D robot asli user** — file `.obj` per-bagian (body, roda kiri, roda
-  kanan) hasil export Tinkercad. `maze_to_webots.py` perlu diubah untuk
-  pakai node `Mesh { url "meshes/....obj" } }` alih-alih `Box`/`Cylinder`
-  placeholder, dengan skala/posisi disesuaikan dimensi mesh asli (Tinkercad
-  biasanya ekspor mm, Webots pakai meter). **BELUM dikerjakan** — menunggu
-  file ditaruh di `sim/webots/micromouse_webots/meshes/` + nama file/
-  dimensi dari user.
+- **Model 3D** (`sim/webots/micromouse_webots/meshes/`, dari Tinkercad):
+  dipakai untuk tampilan; tabrakan tetap kotak/silinder sederhana. Webots
+  tidak memakai warna `.mtl` untuk `Mesh`, jadi `tools/split_obj_by_material.py`
+  memecah tiap `.obj` per warna (`meshes/parts/`) dan generator membuat satu
+  `Shape` per warna. Ukuran dari model: roda 29x8.6 mm, poros 14 mm dari
+  lantai, pusat sensor ~13.5 mm dari lantai, PCB 6.5 mm dari lantai.
+  Orientasi dicek dengan gambar kamera (hasil di `sim/webots/images/`).
+  Body 289 ribu segitiga (peringatan Webots >100k vertex); `--no-mesh` di
+  generator untuk kotak polos.
 - Webots Python API (`controller` module) bawaannya pure Python + ctypes
   (`wb.py` load DLL native via `WEBOTS_HOME`), BUKAN ekstensi terkompilasi
   per-versi Python — jadi tidak perlu `pip install` apa pun, Python

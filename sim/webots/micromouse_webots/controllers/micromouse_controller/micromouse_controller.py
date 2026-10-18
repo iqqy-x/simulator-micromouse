@@ -32,9 +32,9 @@ DT = TIME_STEP / 1000.0
 # kalau maze di-generate ulang dengan --category halfsize, CELL perlu
 # diganti ke 0.09.
 CELL = 0.18
-WHEEL_R = 0.017      # N20 wheel 34x7
-WHEEL_W = 0.007
-TRACK_HALF = 0.0365  # jarak antar roda 73 mm (poros di PCB x=3.5 dan 76.5)
+WHEEL_R = 0.0145     # roda dari model 3D: diameter 29 mm
+WHEEL_W = 0.0086     # lebar 8.6 mm
+TRACK_HALF = 0.0373  # jarak antar pusat roda 74.6 mm
 
 CRUISE_SPEED = 4.0   # rad/s roda saat maju lurus (maks motor 31.4 rad/s)
 MIN_SPEED = 0.8      # rad/s roda saat merayap mendekati target
@@ -79,7 +79,7 @@ FRONT_SAMPLES = 5
 # ~105 mm (nilai ~400); tidak ada -> sinar keluar sel, >250 mm (nilai 0).
 SIDE_SAMPLE_AT = 0.045   # m jarak tempuh dari tengah sel sebelumnya
 SIDE_WINDOW = 0.040      # m lebar jendela (rata-rata semua sampel di dalamnya)
-SIDE_THRESHOLD = 200.0
+SIDE_THRESHOLD = 120.0
 
 log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_log.txt")
 log_file = open(log_path, "w", encoding="utf-8")

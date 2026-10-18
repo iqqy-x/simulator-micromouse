@@ -1725,27 +1725,229 @@ Solid {
   }
 }
 Robot {
-  translation 0.0900 0.0900 0.0170
+  translation 0.0900 0.0900 0.0145
   rotation 0 0 1 1.5707963
   children [
-    Group {
+    Transform {
+      translation 0 0 -0.014009
+      rotation 0 0 1 -1.5707963
+      scale 0.001 0.001 0.001
       children [
-      Transform { translation -0.0230 0 0.0030 children [ Shape { appearance PBRAppearance { baseColor 0.1 0.1 0.85 roughness 0.6 } geometry Box { size 0.0120 0.0800 0.0200 } } ] }
-      Transform { translation 0.0000 0 0.0030 children [ Shape { appearance PBRAppearance { baseColor 0.1 0.1 0.85 roughness 0.6 } geometry Box { size 0.0340 0.0641 0.0200 } } ] }
-      Transform { translation 0.0239 0 0.0030 children [ Shape { appearance PBRAppearance { baseColor 0.1 0.1 0.85 roughness 0.6 } geometry Box { size 0.0139 0.0800 0.0200 } } ] }
-      Transform { translation 0.0334 0 0.0030 children [ Shape { appearance PBRAppearance { baseColor 0.1 0.1 0.85 roughness 0.6 } geometry Box { size 0.0050 0.0798 0.0200 } } ] }
-      Transform { translation 0.0384 0 0.0030 children [ Shape { appearance PBRAppearance { baseColor 0.1 0.1 0.85 roughness 0.6 } geometry Box { size 0.0050 0.0784 0.0200 } } ] }
-      Transform { translation 0.0434 0 0.0030 children [ Shape { appearance PBRAppearance { baseColor 0.1 0.1 0.85 roughness 0.6 } geometry Box { size 0.0050 0.0754 0.0200 } } ] }
-      Transform { translation 0.0484 0 0.0030 children [ Shape { appearance PBRAppearance { baseColor 0.1 0.1 0.85 roughness 0.6 } geometry Box { size 0.0050 0.0706 0.0200 } } ] }
-      Transform { translation 0.0534 0 0.0030 children [ Shape { appearance PBRAppearance { baseColor 0.1 0.1 0.85 roughness 0.6 } geometry Box { size 0.0050 0.0636 0.0200 } } ] }
-      Transform { translation 0.0584 0 0.0030 children [ Shape { appearance PBRAppearance { baseColor 0.1 0.1 0.85 roughness 0.6 } geometry Box { size 0.0050 0.0533 0.0200 } } ] }
-      Transform { translation 0.0634 0 0.0030 children [ Shape { appearance PBRAppearance { baseColor 0.1 0.1 0.85 roughness 0.6 } geometry Box { size 0.0050 0.0360 0.0200 } } ] }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.6627 0.4824 0.3137
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_11107152.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.7020 0.8078 0.8039
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_11783885.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.0706 0.4118 0.2118
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_1206582.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.7843 0.8941 0.7412
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_13165757.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.8667 0.8863 0.8941
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_14541540.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.8824 0.6784 0.2039
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_14789940.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.9137 0.1137 0.1765
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_15277357.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.9725 0.9020 0.7176
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_16311991.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.9804 0.9804 0.9804
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_16448250.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.0980 0.1804 0.3843
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_1650274.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.9882 0.8471 0.2941
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_16570443.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 1.0000 0.8667 0.1020
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_16768282.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 1.0000 0.8941 0.4235
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_16770156.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 1.0000 1.0000 1.0000
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_16777215.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.1255 0.5647 0.3020
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_2134093.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.1686 0.1804 0.1922
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_2829873.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.2314 0.3333 0.6392
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_3888547.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.2745 0.7176 0.2863
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_4634441.obj"
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.3804 0.4039 0.4157
+            roughness 0.6
+            metalness 0
+          }
+          castShadows FALSE
+          geometry Mesh {
+            url "../meshes/parts/body__color_6383466.obj"
+          }
+        }
       ]
     }
     DEF LEFT_WHEEL HingeJoint {
       jointParameters HingeJointParameters {
         axis 0 1 0
-        anchor 0 0.0365 0
+        anchor 0 0.0373 0
       }
       device [
         RotationalMotor {
@@ -1757,19 +1959,33 @@ Robot {
         }
       ]
       endPoint Solid {
-        translation 0 0.0365 0
+        translation 0 0.0373 0
         children [
           Transform {
-            rotation 1 0 0 1.5707963
+            translation -0.000007 -0.037300 -0.014009
+            rotation 0 0 1 -1.5707963
+            scale 0.001 0.001 0.001
             children [
               Shape {
                 appearance PBRAppearance {
-                  baseColor 0.05 0.05 0.05
-                  roughness 0.9
+                  baseColor 0.9804 0.9804 0.9804
+                  roughness 0.6
+                  metalness 0
                 }
-                geometry Cylinder {
-                  height 0.0070
-                  radius 0.0170
+                castShadows FALSE
+                geometry Mesh {
+                  url "../meshes/parts/wheel_left__color_16448250.obj"
+                }
+              }
+              Shape {
+                appearance PBRAppearance {
+                  baseColor 0.1686 0.1804 0.1922
+                  roughness 0.6
+                  metalness 0
+                }
+                castShadows FALSE
+                geometry Mesh {
+                  url "../meshes/parts/wheel_left__color_2829873.obj"
                 }
               }
             ]
@@ -1780,8 +1996,8 @@ Robot {
           rotation 1 0 0 1.5707963
           children [
             Cylinder {
-              height 0.0070
-              radius 0.0170
+              height 0.0086
+              radius 0.0145
             }
           ]
         }
@@ -1792,7 +2008,7 @@ Robot {
     DEF RIGHT_WHEEL HingeJoint {
       jointParameters HingeJointParameters {
         axis 0 1 0
-        anchor 0 -0.0365 0
+        anchor 0 -0.0373 0
       }
       device [
         RotationalMotor {
@@ -1804,19 +2020,33 @@ Robot {
         }
       ]
       endPoint Solid {
-        translation 0 -0.0365 0
+        translation 0 -0.0373 0
         children [
           Transform {
-            rotation 1 0 0 1.5707963
+            translation -0.000000 0.037300 -0.014010
+            rotation 0 0 1 -1.5707963
+            scale 0.001 0.001 0.001
             children [
               Shape {
                 appearance PBRAppearance {
-                  baseColor 0.05 0.05 0.05
-                  roughness 0.9
+                  baseColor 0.9804 0.9804 0.9804
+                  roughness 0.6
+                  metalness 0
                 }
-                geometry Cylinder {
-                  height 0.0070
-                  radius 0.0170
+                castShadows FALSE
+                geometry Mesh {
+                  url "../meshes/parts/wheel_right__color_16448250.obj"
+                }
+              }
+              Shape {
+                appearance PBRAppearance {
+                  baseColor 0.1686 0.1804 0.1922
+                  roughness 0.6
+                  metalness 0
+                }
+                castShadows FALSE
+                geometry Mesh {
+                  url "../meshes/parts/wheel_right__color_2829873.obj"
                 }
               }
             ]
@@ -1827,8 +2057,8 @@ Robot {
           rotation 1 0 0 1.5707963
           children [
             Cylinder {
-              height 0.0070
-              radius 0.0170
+              height 0.0086
+              radius 0.0145
             }
           ]
         }
@@ -1837,21 +2067,21 @@ Robot {
       }
     }
     Solid {
-      translation 0.030 0 -0.0110
+      translation 0.030 0 -0.0115
       children [
         Shape {
           appearance PBRAppearance {
             baseColor 0.2 0.2 0.2
           }
           geometry Sphere {
-            radius 0.0060
+            radius 0.0030
           }
         }
       ]
       name "skid"
     }
     DistanceSensor {
-      translation 0.04750 0.03000 -0.0120
+      translation 0.04750 0.03000 -0.0010
       rotation 0 0 1 0.00000
       children [
         Shape {
@@ -1878,7 +2108,7 @@ Robot {
       numberOfRays 1
     }
     DistanceSensor {
-      translation 0.04750 -0.03000 -0.0120
+      translation 0.04750 -0.03000 -0.0010
       rotation 0 0 1 0.00000
       children [
         Shape {
@@ -1905,7 +2135,7 @@ Robot {
       numberOfRays 1
     }
     DistanceSensor {
-      translation 0.06010 0.00950 -0.0120
+      translation 0.06010 0.00950 -0.0010
       rotation 0 0 1 0.78540
       children [
         Shape {
@@ -1932,7 +2162,7 @@ Robot {
       numberOfRays 1
     }
     DistanceSensor {
-      translation 0.06010 -0.00950 -0.0120
+      translation 0.06010 -0.00950 -0.0010
       rotation 0 0 1 -0.78540
       children [
         Shape {
@@ -1967,17 +2197,17 @@ Robot {
   name "micromouse"
   boundingObject Group {
     children [
-      Transform { translation -0.0230 0 0.0030 children [ Box { size 0.0120 0.0800 0.0200 } ] }
-      Transform { translation 0.0000 0 0.0030 children [ Box { size 0.0340 0.0641 0.0200 } ] }
-      Transform { translation 0.0239 0 0.0030 children [ Box { size 0.0139 0.0800 0.0200 } ] }
-      Transform { translation 0.0334 0 0.0030 children [ Box { size 0.0050 0.0798 0.0200 } ] }
-      Transform { translation 0.0384 0 0.0030 children [ Box { size 0.0050 0.0784 0.0200 } ] }
-      Transform { translation 0.0434 0 0.0030 children [ Box { size 0.0050 0.0754 0.0200 } ] }
-      Transform { translation 0.0484 0 0.0030 children [ Box { size 0.0050 0.0706 0.0200 } ] }
-      Transform { translation 0.0534 0 0.0030 children [ Box { size 0.0050 0.0636 0.0200 } ] }
-      Transform { translation 0.0584 0 0.0030 children [ Box { size 0.0050 0.0533 0.0200 } ] }
-      Transform { translation 0.0634 0 0.0030 children [ Box { size 0.0050 0.0360 0.0200 } ] }
-      Transform { translation 0.030 0 -0.0110 children [ Sphere { radius 0.0060 } ] }
+      Transform { translation -0.0230 0 -0.0000 children [ Box { size 0.0120 0.0800 0.0160 } ] }
+      Transform { translation 0.0000 0 -0.0000 children [ Box { size 0.0340 0.0650 0.0160 } ] }
+      Transform { translation 0.0239 0 -0.0000 children [ Box { size 0.0139 0.0800 0.0160 } ] }
+      Transform { translation 0.0334 0 -0.0000 children [ Box { size 0.0050 0.0798 0.0160 } ] }
+      Transform { translation 0.0384 0 -0.0000 children [ Box { size 0.0050 0.0784 0.0160 } ] }
+      Transform { translation 0.0434 0 -0.0072 children [ Box { size 0.0050 0.0754 0.0016 } ] }
+      Transform { translation 0.0484 0 -0.0072 children [ Box { size 0.0050 0.0706 0.0016 } ] }
+      Transform { translation 0.0534 0 -0.0072 children [ Box { size 0.0050 0.0636 0.0016 } ] }
+      Transform { translation 0.0584 0 -0.0072 children [ Box { size 0.0050 0.0533 0.0016 } ] }
+      Transform { translation 0.0634 0 -0.0072 children [ Box { size 0.0050 0.0360 0.0016 } ] }
+      Transform { translation 0.030 0 -0.0115 children [ Sphere { radius 0.0030 } ] }
     ]
   }
   physics Physics {

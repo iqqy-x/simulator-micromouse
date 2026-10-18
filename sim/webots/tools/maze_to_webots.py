@@ -8,6 +8,7 @@ diambil dari desain PCB (hardware/PickAndPlace_MICE_PCB_2026_10_18.xlsx).
 Cara pakai:
     python maze_to_webots.py <maze.txt> <output.wbt> [--category classic|halfsize]
                              [--controller NAMA]   (bawaan: micromouse_controller)
+                             [--no-mesh]           (pakai kotak/silinder, bukan meshes/*.obj)
 
 Dimensi mengikuti docs/micromouse-rules.md:
     classic : sel 18x18 cm, dinding tinggi 5 cm, tebal 1.2 cm
@@ -46,9 +47,11 @@ DIMENSIONS = {
 # PCB: x ke kanan, y ke depan (sensor ada di y besar).
 AXLE_PCB_MM = (40.0, 29.0)
 
-WHEEL_R = 0.017        # N20 wheel 34x7 -> diameter 34 mm
-WHEEL_W = 0.007        #                    lebar 7 mm
-TRACK_HALF = 0.0365    # poros roda di PCB x=3.5 dan x=76.5 -> jarak 73 mm
+# Dimensi roda dari model 3D (meshes/wheel_*.obj, diukur dari titik-titiknya):
+# diameter 29 mm, lebar 8.6 mm, pusat roda di x=+-37.3 mm dari sumbu tengah.
+WHEEL_R = 0.0145       # diameter 29 mm
+WHEEL_W = 0.0086       # lebar 8.6 mm
+TRACK_HALF = 0.0373    # jarak antar pusat roda 74.6 mm
 MAX_MOTOR_VEL = 31.416  # N20 300 RPM = 31.4 rad/s (tanpa beban)
 
 # Outline PCB (diukur dari hardware/image.png, +-0.5 mm): persegi panjang
@@ -57,19 +60,22 @@ MAX_MOTOR_VEL = 31.416  # N20 300 RPM = 31.4 rad/s (tanpa beban)
 # 72.0). Body disusun dari kotak-kotak (strip) mengikuti outline itu, tapi
 # strip lebar penuh dipotong di luar rentang roda (y_pcb 12-46) supaya tidak
 # menimpa roda (roda 34 mm lebih tinggi dari takik 28.6 mm).
-BODY_NOTCH_HALF_MM = 32.05   # setengah lebar bagian takik (sisi dalam roda 33.0)
+BODY_NOTCH_HALF_MM = 32.5    # setengah lebar bagian takik (sisi dalam roda 33.0)
 BODY_DOME_Y0_MM = 59.9       # mulai lengkung sudut atas
 BODY_TOP_Y_MM = 94.9
 BODY_CORNER_R_MM = 35.0
 BODY_FLAT_HALF_MM = 5.0      # setengah lebar bagian datar di ujung depan
 BODY_DOME_STRIPS = 7
 
-# Tinggi body dari lantai -- ASUMSI: sisi bawah PCB ~10 mm (poros roda 17 mm
-# dikurangi setengah tinggi motor N20), atas komponen ~30 mm. Sensor di 5 mm
-# dari lantai sehingga sinar lewat di BAWAH PCB (tidak berawal di dalam
-# boundingObject).
-BODY_BOTTOM_FLOOR = 0.010
-BODY_TOP_FLOOR = 0.030
+# Tinggi (dari lantai) diukur dari model 3D badan (meshes/body.obj; lantai =
+# dasar roda): bidang bawah PCB 6.5 mm, atas PCB 8.1 mm, komponen tertinggi
+# ~22.5 mm (modul di belakang y_pcb ~71; ada satu benda kecil setinggi 52 mm
+# yang diabaikan untuk tabrakan). Bagian depan (casing sensor, y_pcb > 71)
+# hanya setebal PCB supaya sinar sensor (tinggi 13.5 mm) lewat bebas.
+BODY_BOTTOM_FLOOR = 0.0065
+PLATE_TOP_FLOOR = 0.0081
+BODY_TOP_FLOOR = 0.0225
+TALL_Y_MAX_MM = 71.0   # strip dengan y_pcb_akhir <= ini setinggi komponen
 ROBOT_MASS = 0.08      # ASUMSI
 # Pusat massa: setinggi sumbu roda dan sedikit di DEPAN sumbu (ROBOT_COM_X).
 # Kalau di bawah sumbu (pendulum) atau default (dihitung dari bounding object),
@@ -81,7 +87,9 @@ ROBOT_COM_X = 0.008
 ROBOT_COM_Z = 0.0
 MPU6050_PCB_MM = (40.0, 70.75)
 
-SENSOR_HEIGHT = 0.005  # dari lantai -- perkiraan user, belum ditentukan
+# Casing sensor di model 3D membentang z=8..18 mm (lantai z=-0.5), jadi pusat
+# pasangan emitter-penerima ~13.5 mm dari lantai.
+SENSOR_HEIGHT = 0.0135
 
 # Pasangan emitter SFH4545 + penerima TEFT4300 dipasang TUMPANG TINDIH di
 # dalam casing 3D yang diletakkan di kotak kuning (silkscreen arsir) di PCB;
@@ -103,8 +111,7 @@ SENSOR_ADC_MAX = 4095.0
 SENSOR_D0 = 0.04
 SENSOR_RANGE = 0.25
 SENSOR_NOISE = 0.03          # fraksi nilai respons
-SENSOR_RAYS = 1  # >1 sinar menyebar ke atas/bawah juga: pada tinggi 5 mm sinar
-                 # miring bisa kena lantai dan memberi pembacaan palsu
+SENSOR_RAYS = 1  # >1 sinar menyebar ke atas/bawah juga dan bisa kena lantai
 
 
 def body_blocks():
@@ -122,6 +129,100 @@ def body_blocks():
         hw = BODY_FLAT_HALF_MM + math.sqrt(BODY_CORNER_R_MM ** 2 - dy ** 2)
         blocks.append((lo, hi, hw))
     return blocks
+
+
+MESH_DIR = Path(__file__).resolve().parent.parent / "micromouse_webots" / "meshes"
+USE_MESH = True   # dimatikan dengan --no-mesh atau kalau file mesh tidak ada
+
+
+def mesh_available():
+    return USE_MESH and all(any((MESH_DIR / "parts").glob(f"{n}__*.obj"))
+                            for n in ("body", "wheel_left", "wheel_right"))
+
+
+def mtl_colors(name):
+    """Warna diffuse (Kd) tiap material dari meshes/<name>.mtl."""
+    colors = {}
+    current = None
+    with open(MESH_DIR / f"{name}.mtl", encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("newmtl"):
+                current = line.split()[1]
+            elif line.startswith("Kd") and current:
+                colors[current] = [float(v) for v in line.split()[1:4]]
+    return colors
+
+
+def mesh_part_shapes(name, indent):
+    """Satu Shape per material (warna) dari meshes/parts/<name>__<material>.obj.
+    (Webots tidak memakai warna dari .mtl untuk Mesh -- hasilnya putih polos.)"""
+    colors = mtl_colors(name)
+    pad = " " * indent
+    shapes = []
+    for part in sorted((MESH_DIR / "parts").glob(f"{name}__*.obj")):
+        material = part.stem.split("__", 1)[1]
+        r, g, b = colors.get(material, [0.8, 0.8, 0.8])
+        shapes.append(f"""{pad}Shape {{
+{pad}  appearance PBRAppearance {{
+{pad}    baseColor {r:.4f} {g:.4f} {b:.4f}
+{pad}    roughness 0.6
+{pad}    metalness 0
+{pad}  }}
+{pad}  castShadows FALSE
+{pad}  geometry Mesh {{
+{pad}    url "../meshes/parts/{part.name}"
+{pad}  }}
+{pad}}}""")
+    return "\n".join(shapes)
+
+
+def mesh_center_mm(path):
+    """Titik tengah bounding box (mm) sebuah file .obj."""
+    lo = [1e18] * 3
+    hi = [-1e18] * 3
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("v "):
+                p = line.split()
+                for i in range(3):
+                    v = float(p[i + 1])
+                    lo[i] = min(lo[i], v)
+                    hi[i] = max(hi[i], v)
+    return [(lo[i] + hi[i]) / 2.0 for i in range(3)]
+
+
+# Orientasi mesh Tinkercad (mm): x = samping kanan, y = depan, z = atas, titik
+# asal x/y = sumbu tengah roda. Frame robot Webots: x = depan, y = kiri, z =
+# atas. Jadi mesh diputar -90 derajat sekitar z (x_robot = y_mesh, y_robot =
+# -x_mesh) dan diskala 0.001 (mm -> m).
+MESH_ROT = "rotation 0 0 1 -1.5707963"
+MESH_SCALE = "scale 0.001 0.001 0.001"
+
+
+def mesh_body_visual():
+    cz = mesh_center_mm(MESH_DIR / "wheel_left.obj")[2] / 1000.0  # z poros roda di mesh
+    return f"""    Transform {{
+      translation 0 0 {-cz:.6f}
+      {MESH_ROT}
+      {MESH_SCALE}
+      children [
+{mesh_part_shapes("body", 8)}
+      ]
+    }}"""
+
+
+def mesh_wheel_visual(side):
+    cx, cy, cz = (v / 1000.0 for v in mesh_center_mm(MESH_DIR / f"wheel_{side}.obj"))
+    # titik pusat roda di mesh harus jatuh di titik asal Solid roda:
+    # T = -R(-90) * S * c, R(-90): (x, y, z) -> (y, -x, z)
+    return f"""          Transform {{
+            translation {-cy:.6f} {cx:.6f} {-cz:.6f}
+            {MESH_ROT}
+            {MESH_SCALE}
+            children [
+{mesh_part_shapes(f"wheel_{side}", 14)}
+            ]
+          }}"""
 
 
 def pcb_to_local(px_mm, py_mm):
@@ -219,6 +320,26 @@ def generate_walls(width, rows, horiz, vert, cell, wall_h, wall_t):
     return walls
 
 
+def wheel_visual(side):
+    if mesh_available():
+        return mesh_wheel_visual(side)
+    return f"""          Transform {{
+            rotation 1 0 0 1.5707963
+            children [
+              Shape {{
+                appearance PBRAppearance {{
+                  baseColor 0.05 0.05 0.05
+                  roughness 0.9
+                }}
+                geometry Cylinder {{
+                  height {WHEEL_W:.4f}
+                  radius {WHEEL_R:.4f}
+                }}
+              }}
+            ]
+          }}"""
+
+
 def wheel_node(side, y):
     return f"""    DEF {side.upper()}_WHEEL HingeJoint {{
       jointParameters HingeJointParameters {{
@@ -237,21 +358,7 @@ def wheel_node(side, y):
       endPoint Solid {{
         translation 0 {y:.4f} 0
         children [
-          Transform {{
-            rotation 1 0 0 1.5707963
-            children [
-              Shape {{
-                appearance PBRAppearance {{
-                  baseColor 0.05 0.05 0.05
-                  roughness 0.9
-                }}
-                geometry Cylinder {{
-                  height {WHEEL_W:.4f}
-                  radius {WHEEL_R:.4f}
-                }}
-              }}
-            ]
-          }}
+{wheel_visual(side)}
         ]
         name "{side}_wheel"
         boundingObject Transform {{
@@ -292,10 +399,11 @@ def sensor_node(name, spec):
 
 def body_nodes(visual):
     """Satu Transform per strip body (Shape berwarna, atau Box saja untuk bounding)."""
-    h = BODY_TOP_FLOOR - BODY_BOTTOM_FLOOR
-    cz = (BODY_TOP_FLOOR + BODY_BOTTOM_FLOOR) / 2.0 - WHEEL_R
     nodes = []
     for lo, hi, hw in body_blocks():
+        top = BODY_TOP_FLOOR if hi <= TALL_Y_MAX_MM else PLATE_TOP_FLOOR
+        h = top - BODY_BOTTOM_FLOOR
+        cz = (top + BODY_BOTTOM_FLOOR) / 2.0 - WHEEL_R
         x_lo, _ = pcb_to_local(40.0, lo)
         x_hi, _ = pcb_to_local(40.0, hi)
         size = f"{x_hi - x_lo:.4f} {2 * hw / 1000.0:.4f} {h:.4f}"
@@ -309,8 +417,18 @@ def body_nodes(visual):
     return "\n".join(nodes)
 
 
+def body_visual():
+    if mesh_available():
+        return mesh_body_visual()
+    return f"""    Group {{
+      children [
+{body_nodes(True)}
+      ]
+    }}"""
+
+
 def generate_robot(cell, controller="micromouse_controller"):
-    skid_r = 0.006
+    skid_r = 0.003
     sensors = "\n".join(sensor_node(n, s) for n, s in SENSORS_PCB.items())
     # MPU6050 di PCB (40, 70.75): gyro sumbu Z dipakai untuk sudut belok dan
     # menjaga arah lurus. Rentang +-500 deg/s (8.73 rad/s), noise 1%.
@@ -325,11 +443,7 @@ def generate_robot(cell, controller="micromouse_controller"):
   translation {0.5 * cell:.4f} {0.5 * cell:.4f} {WHEEL_R:.4f}
   rotation 0 0 1 1.5707963
   children [
-    Group {{
-      children [
-{body_nodes(True)}
-      ]
-    }}
+{body_visual()}
 {wheel_node("left", TRACK_HALF)}
 {wheel_node("right", -TRACK_HALF)}
     Solid {{
@@ -380,6 +494,9 @@ def main():
 
     width, rows, horiz, vert = parse_maze(maze_path)
     walls = generate_walls(width, rows, horiz, vert, cell, wall_h, wall_t)
+    global USE_MESH
+    if "--no-mesh" in sys.argv:
+        USE_MESH = False
     controller = "micromouse_controller"
     if "--controller" in sys.argv:
         controller = sys.argv[sys.argv.index("--controller") + 1]
