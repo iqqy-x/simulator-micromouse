@@ -15,6 +15,7 @@ sim/webots/
   micromouse_webots/         project Webots (buka worlds/micromouse.wbt di Webots)
     worlds/
       micromouse.wbt          hasil generate dari maze training/minimaze.txt
+      micromouse_practice8x8.wbt   dari training/practice-8x8-a.txt (untuk Q-learning)
     controllers/
       micromouse_controller/
         micromouse_controller.py   primitif gerak (maju N sel / belok 90 derajat
@@ -49,14 +50,30 @@ sim/webots/
   jadi arah belok terbalik seharusnya sudah akan ketahuan dari crash/
   undershoot, tapi ini masih inferensi tidak langsung, bukan konfirmasi
   visual langsung "robot terlihat belok kanan".
-- **Sensor kiri/kanan dipasang diagonal ~35 derajat ke depan** (meniru tata
-  letak sensor micromouse asli yang memang jarang tegak lurus 90 derajat),
-  BUKAN pengganti langsung `wallLeft()`/`wallRight()` versi `mms` yang
-  instan ya/tidak persis di sisi. Perlu logika interpretasi berbeda nanti
-  (bukan threshold sederhana) saat dipakai untuk navigasi.
-- Parameter fisika lain (massa, gesekan, kalibrasi `lookupTable` sensor
-  jarak) masih dugaan awal generik -- akan diganti begitu robot 3D asli
-  (lihat bawah) masuk, karena geometrinya beda dari box placeholder ini.
+- **Robot kini mengikuti desain PCB** (`hardware/PickAndPlace_MICE_PCB_2026_10_18.xlsx`),
+  bukan placeholder lagi: 4 sensor (`ds_fl`, `ds_fr` menghadap depan di x=+-30 mm,
+  `ds_dl`, `ds_dr` diagonal 45 derajat dekat tengah), roda 34x7 mm, jarak antar
+  roda 73 mm, motor maks 31.4 rad/s (N20 300 RPM). Emitter dan penerima tiap
+  pasangan dipasang tumpang tindih di casing 3D di atas kotak arsir kuning di
+  PCB, jadi posisi sensor = pusat kotak itu (bukan pad footprint): FL/FR di
+  (x=+-30, depan 47.5 mm) menghadap lurus, DL/DR di (x=+-9.5, depan 60.1 mm)
+  menghadap diagonal 45 derajat. Kotak depan terukur 7x7 mm, kotak diagonal
+  belah ketupat berdiagonal 10 mm (ukuran asli dari desain bisa dicek ulang).
+- **Sensor diagonal TIDAK melihat dinding samping sel tempat robot berdiri.**
+  Dari tengah sel, sinar DL/DR mengenai dinding samping sel DI DEPAN (titik kena
+  135 mm di depan tengah sel, jarak sinar 105 mm). Dinding samping sel sendiri
+  baru terbaca kalau robot sedang ~60-180 mm di belakang tengah sel (paling pas
+  ~135 mm). Artinya DL/DR harus disampel SAAT BERGERAK (berdasarkan encoder),
+  atau robot berhenti agak di belakang tengah. FL membaca dinding depan pada
+  36.5 mm dari tengah sel, DL/DR pada 33.8 mm.
+- **Outline body** diukur dari `hardware/image.png` (+-0.5 mm): 80 x 94.9 mm,
+  sudut atas bulat radius 35 mm, takik roda di y_pcb 14.6-43.2. Body disusun
+  dari strip kotak mengikuti outline itu (`body_blocks()`).
+- **Dugaan, belum dikalibrasi:** kurva respons sensor (`SENSOR_D0`, noise 3%; tipe `generic`, BUKAN `infra-red`, karena tipe infra-red memodulasi nilai oleh warna benda dan jarak sehingga kurva tabel tidak terbaca apa adanya),
+  tinggi sensor 5 mm dari lantai, massa 80 g, tinggi body (bawah PCB 10 mm,
+  atas 30 mm dari lantai -- supaya sinar sensor di 5 mm lewat di bawah PCB).
+  Sensor memakai 1 sinar: sinar ganda menyebar ke atas/bawah dan pada tinggi
+  5 mm bisa mengenai lantai. Ganti dengan hasil ukur asli begitu ada.
 - Kalau robot "menembus" dinding tipis (1.2 cm) di kecepatan tinggi: physics
   engine diskrit tiap `basicTimeStep` (16 ms) bisa tunneling -- kecilkan
   `CRUISE_SPEED`/`TURN_SPEED` atau `basicTimeStep`.
@@ -91,9 +108,9 @@ Tambahkan `--category halfsize` untuk maze 32x32 (dimensi sel 9 cm).
 ## Rencana selanjutnya (belum dikerjakan)
 
 - Ganti body/roda placeholder dengan mesh 3D asli (lihat bagian di atas).
-- Tambah fungsi baca dinding dari 3 `DistanceSensor` (perlu logika beda dari
-  threshold sederhana karena posisi sensor diagonal, bukan tegak lurus),
-  menggantikan `wallFront()`/`wallLeft()`/`wallRight()` versi mms --
+- Kalibrasi ambang dinding dari nilai mentah 4 sensor (`read_sensors()` kini
+  hanya mencatat nilai mentah ke `run_log.txt`), lalu tulis fungsi baca dinding
+  yang menggantikan `wallFront()`/`wallLeft()`/`wallRight()` versi mms --
   setelah ini, planner (flood-fill/A*/Q-table, format sama dengan versi
   mms) bisa dipakai ulang hampir tanpa perubahan, cuma ganti pemanggilan
   moveForward/turnLeft/turnRight ke drive_forward_cells/turn di atas.

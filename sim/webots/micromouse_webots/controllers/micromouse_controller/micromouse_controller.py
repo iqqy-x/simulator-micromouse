@@ -17,7 +17,7 @@ untuk angka presisinya (target vs tercapai).
 import math
 import os
 
-from controller import Robot
+from controller import Supervisor
 
 TIME_STEP = 16
 
@@ -25,13 +25,15 @@ TIME_STEP = 16
 # kalau maze di-generate ulang dengan --category halfsize, CELL perlu
 # diganti ke 0.09.
 CELL = 0.18
-WHEEL_R = 0.016
-TRACK_HALF = 0.032
+WHEEL_R = 0.017      # N20 wheel 34x7
+TRACK_HALF = 0.0365  # jarak antar roda 73 mm (poros di PCB x=3.5 dan 76.5)
 
-CRUISE_SPEED = 4.0   # rad/s roda saat maju lurus
+CRUISE_SPEED = 4.0   # rad/s roda saat maju lurus (maks motor 31.4 rad/s)
 TURN_SPEED = 3.0     # rad/s roda saat belok di tempat
 
-FRONT_WALL_THRESHOLD = 600.0  # nilai sensor depan/kiri/kanan di atas ini -> dianggap ada dinding
+# Sensor PCB: FL/FR menghadap depan, DL/DR diagonal 45 derajat. Ambang
+# dinding BELUM ada -- tunggu kalibrasi dari nilai mentah di run_log.txt.
+SENSOR_NAMES = ("ds_fl", "ds_fr", "ds_dl", "ds_dr")
 
 log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_log.txt")
 log_file = open(log_path, "w", encoding="utf-8")
@@ -43,7 +45,10 @@ def log(msg):
     log_file.flush()
 
 
-robot = Robot()
+# Supervisor = Robot + akses ke posisi sebenarnya (untuk validasi dan reset
+# antar episode). Posisi sebenarnya TIDAK dipakai untuk navigasi.
+robot = Supervisor()
+self_node = robot.getSelf()
 
 left_motor = robot.getDevice("left_wheel_motor")
 right_motor = robot.getDevice("right_wheel_motor")
@@ -57,25 +62,27 @@ right_enc = robot.getDevice("right_wheel_sensor")
 left_enc.enable(TIME_STEP)
 right_enc.enable(TIME_STEP)
 
-ds_front = robot.getDevice("ds_front")
-ds_left = robot.getDevice("ds_left")
-ds_right = robot.getDevice("ds_right")
-for ds in (ds_front, ds_left, ds_right):
+sensors = {name: robot.getDevice(name) for name in SENSOR_NAMES}
+for ds in sensors.values():
     ds.enable(TIME_STEP)
 
 # Satu step dulu supaya semua sensor punya nilai valid sebelum dipakai.
 robot.step(TIME_STEP)
 
 
-def read_walls():
-    front, left, right = ds_front.getValue(), ds_left.getValue(), ds_right.getValue()
-    walls = {
-        "front": front > FRONT_WALL_THRESHOLD,
-        "left": left > FRONT_WALL_THRESHOLD,
-        "right": right > FRONT_WALL_THRESHOLD,
-    }
-    log(f"  sensor: front={front:.1f} left={left:.1f} right={right:.1f} -> {walls}")
-    return walls
+def log_true_pose():
+    """Posisi (m) dan arah hadap (derajat, 0 = Timur, 90 = Utara) sebenarnya."""
+    x, y, _ = self_node.getPosition()
+    r = self_node.getOrientation()
+    log(f"  posisi sebenarnya: x={x:.3f} y={y:.3f} arah={math.degrees(math.atan2(r[3], r[0])):.1f}")
+
+
+def read_sensors():
+    """Nilai mentah 4 sensor (skala ~ADC 12-bit, makin besar makin dekat)."""
+    log_true_pose()
+    values = {name: ds.getValue() for name, ds in sensors.items()}
+    log("  sensor: " + " ".join(f"{n[3:].upper()}={v:.0f}" for n, v in values.items()))
+    return values
 
 
 def drive_forward_cells(n=1):
@@ -131,17 +138,17 @@ def turn(direction):
 log("=== Uji primitif gerak (bukan solving maze) ===")
 log("Urutan: maju 1 sel -> belok kanan -> maju 1 sel -> belok kiri -> maju 1 sel")
 log("(sudah dicek lewat parser maze -- jalur ini bebas dinding di minimaze.txt)")
-read_walls()
+read_sensors()
 drive_forward_cells(1)
-read_walls()
+read_sensors()
 turn("right")
-read_walls()
+read_sensors()
 drive_forward_cells(1)
-read_walls()
+read_sensors()
 turn("left")
-read_walls()
+read_sensors()
 drive_forward_cells(1)
-read_walls()
+read_sensors()
 log("=== Selesai. Cek log di atas: tercapai harus dekat dengan target. ===")
 log("=== Robot sekarang idle (motor berhenti). ===")
 
