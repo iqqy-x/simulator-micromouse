@@ -228,7 +228,9 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   cell 114 langkah/351 s, peta 0 salah; lari cepat 22 langkah (optimal)
   15.3 s, sampai di tujuan. Pembacaan sisi di sel tepat sesudah busur
   ("terlambat") kurang andal (nilai tumpang tindih) -- lihat README.
-  Berhenti darurat bila FL/FR melihat dinding depan mendadak <55 mm saat
+  Berhenti darurat (jarak aman 37 mm dari tepi depan PCB ke dinding,
+  `SAFE_STOP_NOSE`; tidak maju lagi setelah rem) bila FL/FR melihat dinding
+  depan mendadak (~59.5 mm sensor-dinding) saat
   seharusnya terbuka (`on_blocked`, reroute). `MM_MAZE` memilih labirin lain;
   file maze hanya untuk ukuran dan penilaian.
 - **Status** (diuji headless lewat `webots.exe --batch --no-rendering

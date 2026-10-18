@@ -642,10 +642,17 @@ DECIDE_BEFORE = 0.095    # m sebelum tengah sel: titik keputusan
 FRONT_EARLY_THRESHOLD = 60.0   # nilai FL/FR rata-rata: dinding depan ada (jarak 125-165 mm)
 LATE_DECIDE_BEFORE = 0.07
 # Berhenti darurat: di jalur lurus sesudah aksi "F" (dinding depan diperkirakan
-# terbuka), kalau rata-rata FL/FR melewati nilai ini (dinding < ~55 mm dari
-# sensor, nilai ~1300) robot langsung direm dan peta diperbaiki lewat
-# on_blocked().
-FRONT_STOP_VALUE = 1300.0
+# terbuka), kalau rata-rata FL/FR melewati nilai pemicu robot langsung direm
+# dan peta diperbaiki lewat on_blocked(). Jarak berhenti aman ditetapkan dari
+# TEPI DEPAN PCB ke dinding (diukur pengguna di model 3D: 37 mm). Sensor ada
+# SENSOR_TO_NOSE di belakang ujung PCB, dan rem masih menempuh BRAKE_MARGIN
+# (terukur 1-2 mm + noise sensor), jadi pemicu dipasang lebih jauh dari itu.
+SAFE_STOP_NOSE = 0.037     # m, jarak berhenti aman: tepi depan PCB ke dinding
+SENSOR_TO_NOSE = 0.0185    # m, ujung PCB (66 mm) - sensor FL/FR (47.5 mm) dari sumbu roda
+BRAKE_MARGIN = 0.004       # m, jarak rem + toleransi pembacaan
+SAFE_STOP_SENSOR = SAFE_STOP_NOSE + SENSOR_TO_NOSE            # jarak sensor-dinding minimum
+FRONT_STOP_VALUE = (SENSOR_ADC_MAX / (1.0 + ((SAFE_STOP_SENSOR + BRAKE_MARGIN) / SENSOR_D0) ** 2)
+                    - SENSOR_FLOOR)                           # nilai FL/FR pemicu (~1160)
 # Di sel "terlambat" robot lebih dekat ke batas sel: sinar DL/DR yang lolos
 # lewat sisi terbuka mengenai dinding DEPAN sel tetangga pada jarak 0.15-0.17 m
 # (nilai ~180-210), mirip dinding samping (nilai >300 di sini). Ambangnya
@@ -669,6 +676,9 @@ def _early_observation(got, key_side, key_front, side_threshold=SIDE_THRESHOLD):
     return out
 
 
+last_blocked = None   # info henti darurat terakhir (untuk validasi)
+
+
 def search_run(on_cell, on_blocked=None):
     """Jelajah tanpa berhenti di tiap sel. Mulai di tengah sel dan diam,
     menghadap arah gerak. Di titik keputusan tiap sel C yang dimasuki,
@@ -680,7 +690,7 @@ def search_run(on_cell, on_blocked=None):
         "STOP" berhenti di tengah C dan selesai.
     Belok di sel yang terlambat diputuskan (lihat di atas) menjadi
     berhenti di tengah C + putar di tempat. Return: jumlah sel dimasuki."""
-    global offset
+    global offset, last_blocked
     center()
     to_center = CELL      # jarak dari awal segmen sekarang ke tengah sel berikutnya
     v_in = 0.0
@@ -700,8 +710,19 @@ def search_run(on_cell, on_blocked=None):
             # direm. Maju/mundur ke tengah sel yang sedang dilewati, minta
             # peta diperbaiki dan arah baru, lalu putar di tempat.
             settle()
-            _drive(prev_before - got["_d"])   # tengah sel itu ada prev_before di depan titik keputusan
-            settle()
+            last_blocked = {
+                "pose_rem": _true_pose(),     # posisi sebenarnya setelah berhenti
+                "nilai_fl_fr": (sensors["ds_fl"].getValue() + sensors["ds_fr"].getValue()) / 2.0,
+                "jarak_tempuh": got["_d"],
+            }
+            # JANGAN mendekat ke dinding setelah rem: kalau terlalu dekat (di bawah
+            # jarak aman), mundur saja; kalau tidak, diam di tempat dan putar. Jarak
+            # sensor-dinding diperkirakan dari nilai FL/FR (kebalikan kurva respons).
+            gap_now = _sensor_distance((sensors["ds_fl"].getValue() + sensors["ds_fr"].getValue()) / 2.0)
+            last_blocked["sensor_ke_dinding"] = gap_now
+            if gap_now < SAFE_STOP_SENSOR:
+                _drive(-(SAFE_STOP_SENSOR - gap_now))
+                settle()
             action = on_blocked()
             log(f"BERHENTI DARURAT: dinding depan mendadak dekat, aksi baru {action}")
             if action in ("L", "R"):

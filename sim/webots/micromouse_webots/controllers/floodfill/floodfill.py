@@ -216,10 +216,36 @@ class Explorer:
         c.log(f"FLOOD sel start: kiri/kanan/belakang diasumsikan dinding; depan "
               f"{'dinding' if seen else 'kosong'} (nilai {value:.0f})")
 
+    def log_stop_distance(self):
+        """Jarak sebenarnya ke dinding depan saat rem darurat (hanya validasi)."""
+        info = c.last_blocked
+        if not info:
+            return
+        # bidang dinding depan sel (x, y) searah h, di sumbu gerak
+        plane = {N: (self.y + 1) * c.CELL - 0.006, E: (self.x + 1) * c.CELL - 0.006,
+                 S: self.y * c.CELL + 0.006, W_: self.x * c.CELL + 0.006}[self.h]
+        sign = 1.0 if self.h in (N, E) else -1.0
+
+        def gap(pose, ahead):
+            axle = pose[1] if self.h in (N, S) else pose[0]
+            return sign * (plane - axle) - ahead   # jarak titik ke dinding
+
+        x, y, deg = info["pose_rem"]
+        pose = c.self_node.getPosition()
+        c.log("FLOOD rem darurat: nilai FL/FR rata-rata %.0f; sensor ke dinding %.1f mm, "
+              "tepi depan PCB ke dinding %.1f mm saat berhenti; sudah menempuh %.0f mm sejak "
+              "titik keputusan" % (info["nilai_fl_fr"], 1000 * gap(info["pose_rem"], 0.0475),
+                                   1000 * gap(info["pose_rem"], 0.066), 1000 * info["jarak_tempuh"]))
+        c.log("FLOOD   sebelum diputar: sensor ke dinding %.1f mm, tepi depan PCB ke dinding %.1f mm "
+              "(batas aman %.0f mm dari tepi PCB)"
+              % (1000 * gap((pose[0], pose[1], 0.0), 0.0475),
+                 1000 * gap((pose[0], pose[1], 0.0), 0.066), 1000 * c.SAFE_STOP_NOSE))
+
     def on_blocked(self):
         """Dinding depan ternyata ada padahal diperkirakan terbuka (berhenti
         darurat): perbaiki peta, hitung ulang, kembalikan aksi relatif."""
         self.blocked_events += 1
+        self.log_stop_distance()
         self.map.set_wall(self.x, self.y, self.h, True)
         c.log(f"FLOOD dinding depan sel ({self.x},{self.y}) arah {NAME[self.h]} "
               f"ditemukan mendadak dekat -- peta diperbaiki, hitung ulang")

@@ -106,14 +106,21 @@ sim/webots/
   90.00 derajat (uji `MM_START_TILT_DEG=6`); arah acuan gyro di-reset lalu
   maju ke tengah sel (persiapan 3.6 s, sebelumnya pemindaian 24 s).
   **Berhenti darurat:** di jalur lurus sesudah aksi "F" (dinding depan
-  diperkirakan terbuka) FL/FR dipantau; kalau rata-ratanya melewati 1300
-  (dinding < ~55 mm dari sensor) robot langsung direm, maju/mundur ke tengah
-  sel, peta diperbaiki (`on_blocked`), dan rute dihitung ulang sebelum
-  diputar di tempat. Diuji dengan `MM_BLIND_FRONT=0,2` (dinding depan sel itu
-  sengaja dianggap terbuka): henti darurat jalan, reroute, dan tetap sampai
+  diperkirakan terbuka) FL/FR dipantau; kalau rata-ratanya melewati ~1170
+  (sensor ~59.5 mm dari dinding) robot langsung direm. Jarak berhenti aman
+  ditetapkan **37 mm dari TEPI DEPAN PCB ke dinding** (diukur pengguna di
+  model 3D; konstanta `SAFE_STOP_NOSE`; sensor 18.5 mm di belakang ujung PCB,
+  jadi 55.5 mm sensor-dinding, ditambah `BRAKE_MARGIN` 4 mm untuk jarak rem
+  dan toleransi pembacaan). Setelah rem robot TIDAK maju lagi (sebelumnya
+  maju ke tengah sel dan sempat tinggal 13 mm dari dinding); kalau di bawah
+  jarak aman cukup mundur, lalu peta diperbaiki (`on_blocked`), rute
+  dihitung ulang, dan robot diputar di tempat. Diuji dengan
+  `MM_BLIND_FRONT=0,2` (dinding depan sel itu sengaja dianggap terbuka):
+  berhenti pada 38.1-39.2 mm dari tepi PCB, reroute jalan, dan tetap sampai
   di tujuan dengan jalur akhir optimal. Pada kunjungan normal tidak pernah
   terpicu (0 kali). Pantauan tidak aktif di busur belok dan di tahap
-  berhenti terencana (jalan buntu, tujuan).
+  berhenti terencana (jalan buntu, tujuan; di tengah sel tepi PCB 18 mm dari
+  dinding).
   **Keterbatasan:** pembacaan samping di sel terlambat tumpang tindih
   (dinding asli 241-800 vs salah baca 184-287), jadi satu-dua sisi bisa salah
   (di run normal terakhir peta 0 salah, tapi uji lain menunjukkan hasil yang masih berubah-ubah); pembacaan
