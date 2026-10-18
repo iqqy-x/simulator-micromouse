@@ -191,10 +191,21 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   (MPU6050), 1 skid. Pusat massa diset eksplisit (`ROBOT_COM_Z`), sensor
   tipe `generic` (BUKAN `infra-red`, yang memodulasi nilai oleh warna/jarak).
 - `controllers/micromouse_controller/micromouse_controller.py` = pustaka
-  gerak + sensor: `drive_forward_cells(n)` (jarak encoder, arah dijaga
-  gyro), `turn("left"/"right")` (sudut gyro, arah acuan mutlak),
-  `read_front_wall()`, `sense_walls()`. Planner apa pun cukup memanggil ini
-  alih-alih moveForward/turnLeft/turnRight versi mms.
+  gerak + sensor. Utama: `run_path("FFRFL")` = gerak BERKELANJUTAN (lurus
+  profil trapesium 0.30 m/s, belok busur halus 90°, tanpa berhenti tiap
+  sel; sel belok tak teramati sensornya). Per sel: `drive_forward_cells(n)`
+  (jarak encoder, arah dijaga gyro), `turn("left"/"right")` (sudut gyro,
+  arah acuan mutlak), `read_front_wall()`, `sense_walls()`. Planner apa pun
+  cukup memanggil ini alih-alih moveForward/turnLeft/turnRight versi mms.
+  Pusat massa robot di sumbu roda + 8 mm ke depan (`ROBOT_COM_X/Z` di
+  generator): pusat massa di bawah sumbu membuat moncong terangkat 7-20°
+  saat melaju. Hasil `run_path` di practice-8x8-a: 15.3 s, rata-rata
+  0.26 m/s, galat arah <1°, galat posisi ke samping menumpuk sampai 27 mm
+  (belum ada koreksi dinding).
+- **Gaya belok** `TURN_STYLE`: `"pivot"` (bawaan, satu roda berputar, roda
+  lain diam; pusat bergeser `PIVOT_RADIUS` 40 mm sehingga `turn()` mundur
+  dulu dan melacak `offset`; galat menumpuk ~1.3 mm/belokan) atau
+  `"point"` (belok di tempat, ~0.05 mm/belokan).
 - **Pembacaan dinding**: dinding depan dari FL/FR di tengah sel; dinding
   kiri/kanan dari DL/DR yang disampel SAAT BERGERAK (jarak tempuh 45 mm
   setelah tengah sel sebelumnya), karena sinar diagonal dari tengah sel
@@ -202,8 +213,8 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   (pindai dengan berputar + `read_front_wall()`).
 - `controllers/wall_test/wall_test.py` (controller dunia
   `micromouse_practice8x8.wbt`): menyusuri jalur BFS di practice-8x8-a dan
-  membandingkan dinding terbaca vs file maze. Hasil uji headless 70/70
-  benar (depan 2001-2222 vs kosong 0-39; samping 397-454 vs kosong 0-30).
+  membandingkan dinding terbaca vs file maze. Hasil uji headless:
+  66/66 benar ( depan 1839-2814 vs kosong 0-38; samping 294-612 vs kosong 0-57).
   Kurva respons sensor masih PERKIRAAN — ganti dengan hasil ukur asli.
 - **Status** (diuji headless lewat `webots.exe --batch --no-rendering
   --mode=fast`; controller berupa Supervisor sehingga posisi SEBENARNYA

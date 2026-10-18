@@ -1983,7 +1983,7 @@ Robot {
   physics Physics {
     density -1
     mass 0.08
-    centerOfMass [ 0 0 -0.004 ]
+    centerOfMass [ 0.008 0 0.0 ]
   }
   supervisor TRUE
   controller "micromouse_controller"

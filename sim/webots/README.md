@@ -41,25 +41,55 @@ sim/webots/
 - **Fisika dasar divalidasi lewat posisi SEBENARNYA (Supervisor), bukan
   encoder saja.** `Cylinder` di Webots R2025a (ENU) bersumbu Z, jadi roda
   diputar 90 derajat di sumbu X agar sejajar `HingeJoint` (sebelumnya
-  tergeletak). Pusat massa diset eksplisit di atas sumbu roda
-  (`ROBOT_COM_Z`); kalau dibiarkan default, skid menanggung beban dan roda
-  slip: belok di tempat hanya memutar badan 59 dari 90 derajat padahal
-  encoder sudah "sampai".
-- **Primitif gerak (`drive_forward_cells`, `turn`): jarak dari encoder,
+  tergeletak). Pusat massa diset eksplisit setinggi sumbu roda dan 8 mm di
+  depannya (`ROBOT_COM_X/Z`). Default (dihitung dari bounding object) membuat
+  skid menanggung beban dan roda slip: belok di tempat hanya memutar badan 59
+  dari 90 derajat padahal encoder sudah "sampai". Pusat massa DI BAWAH sumbu
+  (pendulum) juga buruk: saat melaju moncong terangkat 7-20 derajat dan sinar
+  sensor (tinggi 5 mm) lewat di atas dinding; dengan pusat massa di sumbu
+  kemiringan saat melaju ~0 derajat.
+- **Gerak berkelanjutan (`run_path("FFRFL")`)**: robot tidak berhenti di
+  tiap sel. Lurus memakai profil kecepatan trapesium (jelajah 0.30 m/s,
+  percepatan 2 m/s^2), belok memakai busur halus 90 derajat yang dimulai di
+  tengah sisi sel dan berakhir di tengah sisi sel bersebelahan (setara
+  jari-jari 90 mm): yaw acuan mengikuti smoothstep terhadap jarak busur
+  (laju putar nol di awal dan akhir) dengan umpan maju laju putar, kecepatan
+  di busur 0.20 m/s. Jalur lurus antar belokan digabung jadi satu segmen.
+  Belok pertama di sel start diputar di tempat (tidak bisa halus dari tengah
+  sel). Hasil di practice-8x8-a (22 langkah, 11 belokan halus): 15.3 s
+  simulasi, kecepatan rata-rata 0.26 m/s (gerak per sel sebelumnya 0.07 m/s
+  jelajah dengan berhenti tiap sel). Galat arah di tengah sel <1 derajat;
+  galat posisi menumpuk ke SAMPING (maks 27 mm dari tengah sel setelah 11
+  belokan, rata-rata 16 mm) karena belum ada koreksi dinding -- langkah
+  berikutnya (pemusatan dengan DL/DR dan penyelarasan dinding depan).
+  Sel tempat belok halus tidak teramati sensornya.
+- **Gerak per sel (`drive_forward_cells`, `turn`, tetap tersedia): jarak dari encoder,
   sudut dari gyro (MPU6050), arah acuan mutlak.** Hasil uji (posisi
   sebenarnya): maju 1 sel = 0.180 m; 10 putaran pulang-pergi (maju, belok
   kiri x2, maju, belok kanan x2 = 40 belokan) berakhir 2 mm dari titik awal
   dan arah meleset <1 derajat -- tidak menumpuk karena tiap belok
   menambah +-90 derajat ke arah acuan dan saat maju yaw dikoreksi ke acuan.
-- **Pembacaan dinding (`sense_walls()`, `read_front_wall()`) divalidasi
-  70/70 benar** di practice-8x8-a (`wall_test`: robot menyusuri jalur
+- **Pembacaan dinding: dengan `run_path` 33/33 benar pada sel yang teramati
+  (sel lurus; sel belok halus dan sel start tidak teramati); dengan gerak per
+  sel (`sense_walls()`, `read_front_wall()`) 66/66 benar** di practice-8x8-a (`wall_test`: robot menyusuri jalur
   terpendek 22 langkah; dinding terbaca hanya dari sensor, dibandingkan
-  dengan file maze). Depan: FL/FR di tengah sel (dinding 2001-2222, kosong
-  0-39, ambang 800). Samping: DL/DR disampel SAAT BERGERAK di jarak tempuh
-  45 mm setelah tengah sel sebelumnya (dinding 397-454, kosong 0-30, ambang
-  200). Sel start tidak bisa dibaca sisinya dari tengah sel -- pindai dengan
-  berputar dan `read_front_wall()`. Margin ini hanya berlaku untuk kurva
-  sensor perkiraan; ulangi uji setelah kurva diganti hasil ukur asli.
+  dengan file maze). Depan: FL/FR di tengah sel (dinding 1839-2814, kosong
+  0-38, ambang 800). Samping: DL/DR disampel SAAT BERGERAK di jarak tempuh
+  45 mm setelah tengah sel sebelumnya (dinding 294-612, kosong 0-57, ambang
+  200). Sel start tidak bisa dibaca sisinya dari tengah sel; `wall_test`
+  tidak memindainya. Margin ini hanya berlaku untuk kurva sensor perkiraan;
+  ulangi uji setelah kurva diganti hasil ukur asli.
+- **Gaya belok (`TURN_STYLE`)**: `"pivot"` (bawaan) = hanya SATU roda berputar
+  (belok kanan: roda kiri maju, kanan diam; belok kiri sebaliknya);
+  `"point"` = kedua roda berlawanan arah, belok di tempat. Pivot menggeser
+  pusat robot sejauh `PIVOT_RADIUS` (40 mm = setengah jarak roda + setengah
+  lebar roda, terukur; roda diam berputar di tepi luar silinder), jadi
+  `turn()` mundur dulu lalu memutar, dan robot berhenti `PIVOT_RADIUS` di
+  depan tengah sel (`offset`); `drive_forward_cells()` memotong jaraknya,
+  `read_front_wall()` mundur ke tengah dulu. Akurasi: pivot menumpuk galat
+  ~1.3 mm per belokan (14 mm setelah 11 belokan di wall_test) karena roda
+  diam sedikit tergelincir; belok di tempat ~0.05 mm per belokan (2 mm
+  setelah 36 belokan). Pivot belum dikoreksi sensor.
 - **Robot kini mengikuti desain PCB** (`hardware/PickAndPlace_MICE_PCB_2026_10_18.xlsx`),
   bukan placeholder lagi: 4 sensor (`ds_fl`, `ds_fr` menghadap depan di x=+-30 mm,
   `ds_dl`, `ds_dr` diagonal 45 derajat dekat tengah), roda 34x7 mm, jarak antar

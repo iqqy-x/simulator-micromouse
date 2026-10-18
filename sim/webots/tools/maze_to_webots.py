@@ -71,11 +71,14 @@ BODY_DOME_STRIPS = 7
 BODY_BOTTOM_FLOOR = 0.010
 BODY_TOP_FLOOR = 0.030
 ROBOT_MASS = 0.08      # ASUMSI
-# Pusat massa tepat di atas sumbu roda (sedikit di bawahnya agar stabil).
-# Kalau dibiarkan default (dihitung dari bounding object) pusat massa bergeser
-# ke depan, skid menanggung beban dan gesekannya membuat roda slip saat
-# belok di tempat (hanya berputar 59 dari 90 derajat pada uji).
-ROBOT_COM_Z = -0.004
+# Pusat massa: setinggi sumbu roda dan sedikit di DEPAN sumbu (ROBOT_COM_X).
+# Kalau di bawah sumbu (pendulum) atau default (dihitung dari bounding object),
+# percepatan membuat badan menungging: pada uji, saat melaju moncong terangkat
+# 7-20 derajat sehingga sinar sensor (tinggi 5 mm) lewat di atas dinding.
+# Setinggi sumbu -> percepatan tidak memberi torsi pitch dari gaya inersia; sedikit di
+# depan sumbu -> skid depan selalu menapak ringan (beban ~ ROBOT_COM_X/0.03 dari berat).
+ROBOT_COM_X = 0.008
+ROBOT_COM_Z = 0.0
 MPU6050_PCB_MM = (40.0, 70.75)
 
 SENSOR_HEIGHT = 0.005  # dari lantai -- perkiraan user, belum ditentukan
@@ -355,7 +358,7 @@ def generate_robot(cell, controller="micromouse_controller"):
   physics Physics {{
     density -1
     mass {ROBOT_MASS}
-    centerOfMass [ 0 0 {ROBOT_COM_Z} ]
+    centerOfMass [ {ROBOT_COM_X} 0 {ROBOT_COM_Z} ]
   }}
   supervisor TRUE
   controller "{controller}"

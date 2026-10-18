@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 """
-Uji pembacaan dinding dengan sensor PCB (FL/FR/DL/DR) di maze practice-8x8-a.
+Uji gerak berkelanjutan dan pembacaan dinding di maze practice-8x8-a.
 
-Robot menyusuri jalur terpendek dari start ke tengah sel demi sel. Di tiap
-sel ia membaca dinding depan/kiri/kanan HANYA dari sensor (sense_walls()),
-lalu hasilnya dibandingkan dengan file maze. File maze dipakai untuk dua
-hal saja: memilih jalur bebas tabrakan (BFS) dan menilai hasil -- tidak
-pernah untuk menentukan pembacaan.
+Robot menyusuri jalur terpendek dari start ke tengah labirin TANPA berhenti
+di tiap sel (run_path: lurus dengan profil kecepatan trapesium, belok halus).
+Dinding dibaca hanya dari sensor, lalu dibandingkan dengan file maze. File
+maze dipakai untuk dua hal saja: memilih jalur bebas tabrakan (BFS) dan
+menilai hasil -- tidak pernah untuk menentukan pembacaan.
 
-Sel start dipindai dengan read_front_wall() sambil berputar di tempat
-(DL/DR tidak bisa membaca dinding samping sel yang sedang ditempati).
+Yang dilaporkan (baris WALLTEST di run_log.txt):
+  - waktu tempuh, kecepatan rata-rata
+  - galat posisi/arah SEBENARNYA saat melewati tengah tiap sel
+  - benar/salah pembacaan dinding untuk sel yang teramati (sel tempat belok
+    halus tidak teramati; sel start tidak dibaca)
 
-Hasil lengkap ke run_log.txt (baris WALLTEST). Set variabel lingkungan
-MICROMOUSE_QUIT=1 agar Webots keluar sendiri setelah selesai (untuk uji
-headless); tanpa itu robot idle seperti biasa.
+Set variabel lingkungan MICROMOUSE_QUIT=1 agar Webots keluar sendiri setelah
+selesai (untuk uji headless); tanpa itu robot idle seperti biasa.
 """
 
+import math
 import os
 import sys
 from collections import deque
@@ -32,6 +35,7 @@ MAZE = os.path.abspath(os.path.join(
 
 DIRS = ["N", "E", "S", "W"]
 DELTA = {"N": (0, 1), "E": (1, 0), "S": (0, -1), "W": (-1, 0)}
+HEADING_DEG = {"E": 0.0, "N": 90.0, "W": 180.0, "S": -90.0}
 
 width, rows, horiz, vert = parse_maze(MAZE)
 
@@ -69,62 +73,76 @@ def shortest_path(start, goals):
     raise RuntimeError("tidak ada jalur ke goal")
 
 
-def turn_to(heading, target):
-    diff = (DIRS.index(target) - DIRS.index(heading)) % 4
-    if diff == 1:
-        c.turn("right")
-    elif diff == 3:
-        c.turn("left")
-    elif diff == 2:
-        c.turn("right")
-        c.turn("right")
-    return target
-
-
 def rel(heading, offset):
     return DIRS[(DIRS.index(heading) + offset) % 4]
+
+
+def to_plan(path, heading="N"):
+    """Arah mutlak per langkah -> aksi relatif 'F'/'L'/'R' per sel."""
+    plan = []
+    for d in path:
+        diff = (DIRS.index(d) - DIRS.index(heading)) % 4
+        plan.append({0: "F", 1: "R", 3: "L"}[diff])
+        heading = d
+    return "".join(plan)
 
 
 mx, my = width // 2, rows // 2
 goals = {(gx, gy) for gx in (mx - 1, mx) for gy in (my - 1, my)}
 path = shortest_path((0, 0), goals)
-
+plan = to_plan(path)
 c.log("WALLTEST maze=practice-8x8-a  jalur=" + " ".join(path) + f"  ({len(path)} langkah)")
+c.log("WALLTEST rencana relatif=" + plan)
+
+t0 = c.robot.getTime()
+obs = c.run_path(plan)
+elapsed = c.robot.getTime() - t0
+length = len(path) * c.CELL
+c.log(f"WALLTEST waktu tempuh {elapsed:.1f} s (simulasi), {length:.2f} m, "
+      f"kecepatan rata-rata {length / elapsed:.3f} m/s")
 
 checks = []  # (label, terbaca, sebenarnya, nilai)
-
-# --- Sel start: pindai 4 sisi dengan FL/FR sambil berputar di tempat -------
-heading = "N"
-for d in ("N", "W", "E", "S"):
-    heading = turn_to(heading, d)
-    seen, value = c.read_front_wall()
-    checks.append((f"start {d}", seen, truth_wall(0, 0, d), value))
-heading = turn_to(heading, "N")
-
-# --- Susuri jalur, baca dinding tiap sel hanya dari sensor ---------------------
 x, y = 0, 0
-for d in path:
-    heading = turn_to(heading, d)
-    c.drive_forward_cells(1)
+pos_err, head_err = [], []
+for k, d in enumerate(path):
     x, y = x + DELTA[d][0], y + DELTA[d][1]
-    walls = c.sense_walls()
-    _, front_value = c.read_front_wall()
-    left_value, right_value = c.last_side_values
+    o = obs[k]
+    if o["pose"]:
+        px, py, ph = o["pose"]
+        dx, dy = px - (x + 0.5) * c.CELL, py - (y + 0.5) * c.CELL
+        e = 1000 * math.hypot(dx, dy)
+        hx, hy = DELTA[d]
+        along = 1000 * (dx * hx + dy * hy)    # + = di depan tengah sel
+        cross = 1000 * (-dx * hy + dy * hx)   # + = di kiri jalur tengah
+        he = (ph - HEADING_DEG[d] + 180) % 360 - 180
+        pos_err.append(e)
+        head_err.append(he)
+        c.log(f"WALLTEST ({x},{y}) {d} galat posisi {e:5.1f} mm "
+              f"(sepanjang jalur {along:+5.1f}, ke kiri {cross:+5.1f})  galat arah {he:+5.1f} derajat")
+    else:
+        c.log(f"WALLTEST ({x},{y}) {d} belok halus (tidak teramati)")
+    if o.get("pitch") is not None:
+        c.log(f"WALLTEST ({x},{y}) kemiringan depan-belakang saat sampel samping {o['pitch']:+.2f} derajat")
     for label, seen, d_abs, value in (
-        ("depan", walls["front"], heading, front_value),
-        ("kiri", walls["left"], rel(heading, 3), left_value),
-        ("kanan", walls["right"], rel(heading, 1), right_value),
+        ("depan", o["front"], d, o["front_value"]),
+        ("kiri", o["left"], rel(d, 3), o["left_value"]),
+        ("kanan", o["right"], rel(d, 1), o["right_value"]),
     ):
-        checks.append((f"({x},{y}) {label}", seen, truth_wall(x, y, d_abs), value))
+        if seen is not None:
+            checks.append((f"({x},{y}) {label}", seen, truth_wall(x, y, d_abs), value))
 
-# --- Ringkasan -----------------------------------------------------------------
 wrong = [k for k in checks if k[1] != k[2]]
 for label, seen, truth, value in checks:
     flag = "" if seen == truth else "   <-- SALAH"
     c.log(f"WALLTEST {label:<12} terbaca={'dinding' if seen else 'kosong ':<7} "
           f"sebenarnya={'dinding' if truth else 'kosong ':<7} nilai={value:7.1f}{flag}")
-c.log(f"WALLTEST selesai: {len(checks) - len(wrong)}/{len(checks)} benar")
-for kind in ("depan", "kiri", "kanan", "start"):
+c.log(f"WALLTEST selesai: {len(checks) - len(wrong)}/{len(checks)} pembacaan benar "
+      f"(dari {3 * len(path)} kemungkinan; sisanya sel belok halus / tak teramati)")
+if pos_err:
+    c.log(f"WALLTEST galat posisi di tengah sel: maks {max(pos_err):.1f} mm, "
+          f"rata-rata {sum(pos_err) / len(pos_err):.1f} mm; "
+          f"galat arah maks {max(abs(h) for h in head_err):.1f} derajat")
+for kind in ("depan", "kiri", "kanan"):
     wall_v = [k[3] for k in checks if kind in k[0] and k[2]]
     free_v = [k[3] for k in checks if kind in k[0] and not k[2]]
     if wall_v and free_v:

@@ -33,6 +33,7 @@ DT = TIME_STEP / 1000.0
 # diganti ke 0.09.
 CELL = 0.18
 WHEEL_R = 0.017      # N20 wheel 34x7
+WHEEL_W = 0.007
 TRACK_HALF = 0.0365  # jarak antar roda 73 mm (poros di PCB x=3.5 dan 76.5)
 
 CRUISE_SPEED = 4.0   # rad/s roda saat maju lurus (maks motor 31.4 rad/s)
@@ -45,6 +46,17 @@ TURN_SPEED = 3.0     # rad/s roda maksimum saat belok di tempat
 TURN_MIN = 0.5       # rad/s roda minimum saat belok (mendekati target)
 TURN_GAIN = 6.0      # rad/s roda per radian sisa sudut
 TURN_TOL = math.radians(0.5)
+# Gaya belok: "pivot" = satu roda saja yang berputar (roda lain diam),
+# "point" = kedua roda berlawanan arah (belok di tempat). Lihat turn().
+TURN_STYLE = "pivot"
+# Roda yang diam berputar di titik kontaknya di sisi LUAR silinder (lebar 7 mm),
+# bukan di tengah, jadi jari-jari pivot efektif = TRACK_HALF + lebar roda / 2.
+# Terukur: dengan TRACK_HALF saja, tiap belok meleset ~4 mm ke depan dan ~3 mm
+# ke samping; dengan nilai ini hasilnya cocok.
+PIVOT_RADIUS = TRACK_HALF + WHEEL_W / 2.0
+PIVOT_SPEED = 6.0    # rad/s roda yang berputar (rotasi badan = w*R/(2*TRACK_HALF))
+PIVOT_MIN = 1.0
+PIVOT_GAIN = 12.0
 HEADING_KP = 10.0    # rad/s roda per radian error arah saat maju lurus
 
 SETTLE_STEPS = 6     # langkah tunggu setelah berhenti supaya robot diam
@@ -148,59 +160,88 @@ def read_sensors():
 last_side_walls = None   # (kiri, kanan) sel terakhir yang dimasuki, atau None
 last_side_values = None  # nilai rata-rata DL/DR di jendela sampel (untuk kalibrasi)
 
+# Posisi robot terhadap TENGAH sel, searah arah hadap (m). + = di depan
+# tengah sel. Belok satu-roda (pivot) membuat sumbu roda berpindah, jadi
+# posisi ini harus dilacak (lihat turn()).
+offset = 0.0
 
-def drive_forward_cells(n=1):
-    """Maju N sel lurus. Jarak dari rata-rata rotasi roda (encoder), arah
-    dijaga lewat gyro, kecepatan dihaluskan (ramp naik, melambat mendekati
-    target) supaya roda tidak slip.
 
-    Sambil jalan, DL/DR disampel untuk dinding kiri/kanan tiap sel yang
-    dimasuki (lihat SIDE_*). Return: daftar (kiri, kanan) satu per sel."""
-    global last_side_walls, last_side_values
-    target = n * CELL / WHEEL_R
+def _drive(dist, side_cells=0):
+    """Gerak lurus sejauh dist meter (+ maju, - mundur). Jarak dari rata-rata
+    rotasi roda (encoder), arah dijaga lewat gyro, kecepatan dihaluskan (ramp
+    naik, melambat mendekati target) supaya roda tidak slip.
+
+    side_cells > 0: DL/DR disampel untuk dinding kiri/kanan tiap sel yang
+    dimasuki (lihat SIDE_*). Return (sampel per sel, rotasi roda tercapai)."""
+    sign = 1.0 if dist >= 0 else -1.0
+    target = abs(dist) / WHEEL_R
     l0, r0 = left_enc.getValue(), right_enc.getValue()
     speed = 0.0
     avg = 0.0
-    side_samples = [[] for _ in range(n)]  # per sel: daftar (DL, DR)
+    samples = [[] for _ in range(side_cells)]  # per sel: daftar (DL, DR)
 
     while True:
-        avg = ((left_enc.getValue() - l0) + (right_enc.getValue() - r0)) / 2.0
-        travelled = avg * WHEEL_R
-        for k in range(n):
-            lo = k * CELL + SIDE_SAMPLE_AT - SIDE_WINDOW / 2.0
-            if lo <= travelled <= lo + SIDE_WINDOW:
-                side_samples[k].append((sensors["ds_dl"].getValue(),
-                                        sensors["ds_dr"].getValue()))
+        avg = sign * ((left_enc.getValue() - l0) + (right_enc.getValue() - r0)) / 2.0
+        if side_cells:
+            from_center = offset + avg * WHEEL_R  # jarak dari tengah sel sebelumnya
+            for k in range(side_cells):
+                lo = k * CELL + SIDE_SAMPLE_AT - SIDE_WINDOW / 2.0
+                if lo <= from_center <= lo + SIDE_WINDOW:
+                    samples[k].append((sensors["ds_dl"].getValue(),
+                                       sensors["ds_dr"].getValue()))
         remaining = target - avg
         if remaining <= STOP_TOL:
             break
         wanted = min(CRUISE_SPEED, max(MIN_SPEED, DECEL_GAIN * remaining))
         speed = min(wanted, speed + ACCEL * DT)
+        # Selisih kecepatan roda memutar badan ke arah yang sama baik maju
+        # maupun mundur, jadi koreksi arah memakai rumus yang sama.
         correction = HEADING_KP * (target_yaw - yaw)  # + = perlu belok kiri
-        set_wheels(speed - correction, speed + correction)
+        set_wheels(sign * speed - correction, sign * speed + correction)
         step()
 
     settle()
-    dl = left_enc.getValue() - l0
-    dr = right_enc.getValue() - r0
-    log(f"maju {n} sel: target={target:.3f} rad, tercapai={avg:.3f} rad "
-        f"(kiri={dl:.3f}, kanan={dr:.3f}), yaw={math.degrees(yaw):.1f}")
+    return samples, avg
+
+
+def drive_forward_cells(n=1):
+    """Maju N sel lurus dari posisi sekarang sampai tengah sel ke-N. Sambil
+    jalan, DL/DR disampel untuk dinding kiri/kanan tiap sel yang dimasuki.
+    Return: daftar (kiri, kanan) satu per sel."""
+    global offset, last_side_walls, last_side_values
+    l0, r0 = left_enc.getValue(), right_enc.getValue()
+    samples, avg = _drive(n * CELL - offset, side_cells=n)
+    offset = 0.0
+    log(f"maju {n} sel: tercapai={avg:.3f} rad "
+        f"(kiri={left_enc.getValue() - l0:.3f}, kanan={right_enc.getValue() - r0:.3f}), "
+        f"yaw={math.degrees(yaw):.1f}")
 
     result = []
-    for samples in side_samples:
-        if not samples:
+    for cell_samples in samples:
+        if not cell_samples:
             raise RuntimeError("jendela sampel DL/DR kosong -- naikkan SIDE_WINDOW")
-        mean_l = sum(s[0] for s in samples) / len(samples)
-        mean_r = sum(s[1] for s in samples) / len(samples)
+        mean_l = sum(s[0] for s in cell_samples) / len(cell_samples)
+        mean_r = sum(s[1] for s in cell_samples) / len(cell_samples)
         result.append((mean_l > SIDE_THRESHOLD, mean_r > SIDE_THRESHOLD, mean_l, mean_r))
     last_side_walls = (result[-1][0], result[-1][1])
     last_side_values = (result[-1][2], result[-1][3])  # nilai rata-rata, untuk log/kalibrasi
     return [(r[0], r[1]) for r in result]
 
 
+def center():
+    """Mundur ke tengah sel (offset -> 0). Perlu sebelum membaca dinding
+    depan setelah belok pivot, karena robot berhenti di depan tengah sel."""
+    global offset
+    if abs(offset) > 1e-4:
+        _drive(-offset)
+        offset = 0.0
+
+
 def read_front_wall():
-    """Dinding di depan sel tempat robot berdiri (robot harus di tengah sel).
-    Rata-rata FL dan FR dari beberapa langkah. Return (ada_dinding, nilai)."""
+    """Dinding di depan sel tempat robot berdiri. Robot dibawa ke tengah sel
+    dulu (center()), lalu rata-rata FL dan FR dari beberapa langkah.
+    Return (ada_dinding, nilai)."""
+    center()
     total = 0.0
     for _ in range(FRONT_SAMPLES):
         step()
@@ -220,41 +261,259 @@ def sense_walls():
     return {"front": front, "left": left, "right": right}
 
 
-def turn(direction):
-    """Belok 90 derajat di tempat. direction: 'left' atau 'right'. Berhenti
-    berdasarkan sudut gyro terhadap arah acuan, bukan rotasi roda."""
+def _point_turn(direction):
+    """Belok di tempat (kedua roda berlawanan arah), hanya dari tengah sel."""
     global target_yaw
+    if abs(offset) > 1e-4:
+        raise RuntimeError("belok di tempat hanya dari tengah sel -- panggil center()")
     target_yaw += (math.pi / 2) * (1.0 if direction == "left" else -1.0)
-
     while True:
-        err = target_yaw - yaw  # + = perlu belok kiri
+        err = target_yaw - yaw
         if abs(err) <= TURN_TOL:
             break
-        w = min(TURN_SPEED, max(TURN_MIN, TURN_GAIN * abs(err)))
-        w = math.copysign(w, err)
+        w = math.copysign(min(TURN_SPEED, max(TURN_MIN, TURN_GAIN * abs(err))), err)
         set_wheels(-w, w)
         step()
+    settle()
+    log(f"belok {direction} (di tempat): yaw={math.degrees(yaw):.1f} "
+        f"(acuan {math.degrees(target_yaw):.1f})")
+
+
+def turn(direction):
+    """Belok 90 derajat. direction: 'left' atau 'right'. Berhenti berdasarkan
+    sudut gyro terhadap arah acuan, bukan rotasi roda.
+
+    TURN_STYLE "pivot": hanya SATU roda yang berputar -- belok kanan: roda
+    kiri maju, roda kanan diam; belok kiri sebaliknya. Pusat robot berputar
+    mengelilingi roda yang diam, jadi bergeser PIVOT_RADIUS ke depan dan ke
+    samping. Agar akhirnya persis di jalur tengah sel, robot mundur dulu
+    (offset + PIVOT_RADIUS) lalu berputar; hasilnya robot berhenti
+    PIVOT_RADIUS di depan tengah sel searah arah baru
+    (offset = PIVOT_RADIUS), dan
+    drive_forward_cells() otomatis menghitung sisa jaraknya.
+
+    TURN_STYLE "point": kedua roda berputar berlawanan arah (belok di
+    tempat, tanpa pergeseran); hanya benar kalau robot di tengah sel."""
+    global target_yaw, offset
+    delta = (math.pi / 2) * (1.0 if direction == "left" else -1.0)
+
+    if TURN_STYLE == "pivot":
+        # Mundur DULU dengan arah acuan lama (kalau acuan sudah diubah,
+        # penjaga arah ikut memutar badan selama mundur dan jalurnya melengkung).
+        _drive(-(offset + PIVOT_RADIUS))
+        target_yaw += delta
+        while True:
+            err = target_yaw - yaw  # + = perlu belok kiri
+            if abs(err) <= TURN_TOL:
+                break
+            w = min(PIVOT_SPEED, max(PIVOT_MIN, PIVOT_GAIN * abs(err)))
+            # err > 0: roda kanan maju, kiri diam (pivot di roda kiri)
+            set_wheels(0.0, w) if err > 0 else set_wheels(w, 0.0)
+            step()
+        offset = PIVOT_RADIUS
+    else:
+        _point_turn(direction)
+        return
 
     settle()
-    log(f"belok {direction}: yaw={math.degrees(yaw):.1f} "
+    log(f"belok {direction} ({TURN_STYLE}): yaw={math.degrees(yaw):.1f} "
         f"(acuan {math.degrees(target_yaw):.1f})")
+
+
+# ---------------------------------------------------------------------------
+# Gerak berkelanjutan: lurus dengan profil kecepatan trapesium + belok halus.
+# Robot tidak berhenti di tiap sel; hanya berhenti di akhir lintasan.
+# ---------------------------------------------------------------------------
+
+V_CRUISE = 0.30      # m/s kecepatan jelajah di jalur lurus
+V_TURN = 0.20        # m/s kecepatan di belokan halus
+ACCEL_LIN = 2.0      # m/s^2 percepatan dan perlambatan di jalur lurus
+V_MIN = 0.04         # m/s kecepatan terendah saat mendekati titik berhenti
+YAW_KP = 8.0         # (rad/s) per rad: koreksi arah saat lurus dan di belokan
+END_TOL = 0.0005     # m toleransi akhir segmen (encoder)
+
+
+def _smoothstep(t):
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _smoothstep_rate(t):
+    return 6.0 * t * (1.0 - t)
+
+
+def _arc_length():
+    """Panjang busur belok halus. Arah (yaw) dibuat mengikuti smoothstep
+    terhadap jarak (laju putar nol di awal dan akhir, tanpa hentakan), dan
+    panjangnya dipilih sehingga robot bergeser tepat CELL/2 ke depan dan ke
+    samping: masuk di tengah sisi sel, keluar di tengah sisi sel yang
+    bersebelahan (setara jari-jari 90 mm untuk sel 180 mm)."""
+    n = 2000
+    integral = sum(math.cos((math.pi / 2) * _smoothstep((i + 0.5) / n)) for i in range(n)) / n
+    return (CELL / 2.0) / integral
+
+
+ARC_LEN = _arc_length()
+
+
+def _distance_since(l0, r0):
+    """Jarak tempuh pusat robot (m) sejak encoder bernilai (l0, r0)."""
+    return ((left_enc.getValue() - l0) + (right_enc.getValue() - r0)) / 2.0 * WHEEL_R
+
+
+def _set_speed(v, omega):
+    """Kecepatan pusat v (m/s) dan laju putar omega (rad/s, + = kiri)."""
+    set_wheels((v - omega * TRACK_HALF) / WHEEL_R, (v + omega * TRACK_HALF) / WHEEL_R)
+
+
+def _true_pose():
+    x, y, _ = self_node.getPosition()
+    r = self_node.getOrientation()
+    return (x, y, math.degrees(math.atan2(r[3], r[0])))
+
+
+def _run_straight(length, v_in, v_out, watch):
+    """Lurus sejauh length (m): naik dari v_in, jelajah V_CRUISE, turun ke
+    v_out. watch = daftar (kunci, d_awal, d_akhir): sampel sensor diambil saat
+    jarak tempuh d di dalam jendela; return dict kunci -> daftar sampel."""
+    l0, r0 = left_enc.getValue(), right_enc.getValue()
+    got = {key: [] for key, _, _ in watch}
+    while True:
+        d = _distance_since(l0, r0)
+        for key, lo, hi in watch:
+            if lo <= d <= hi:
+                got[key].append((sensors["ds_fl"].getValue(), sensors["ds_fr"].getValue(),
+                                 sensors["ds_dl"].getValue(), sensors["ds_dr"].getValue(),
+                                 _true_pose(), math.degrees(math.asin(self_node.getOrientation()[6]))))
+        if d >= length - END_TOL:
+            break
+        v = min(V_CRUISE,
+                math.sqrt(v_in * v_in + 2.0 * ACCEL_LIN * d),
+                math.sqrt(v_out * v_out + 2.0 * ACCEL_LIN * max(length - d, 0.0)))
+        _set_speed(max(v, V_MIN), YAW_KP * (target_yaw - yaw))
+        step()
+    return got
+
+
+def _run_arc(direction):
+    """Belok halus 90 derajat dengan V_TURN: yaw acuan mengikuti smoothstep
+    terhadap jarak busur, ditambah umpan maju laju putar."""
+    global target_yaw
+    sign = 1.0 if direction == "left" else -1.0
+    yaw_start = target_yaw
+    l0, r0 = left_enc.getValue(), right_enc.getValue()
+    while True:
+        s = _distance_since(l0, r0)
+        if s >= ARC_LEN - END_TOL:
+            break
+        t = s / ARC_LEN
+        yaw_ref = yaw_start + sign * (math.pi / 2) * _smoothstep(t)
+        omega_ff = sign * (math.pi / 2) * _smoothstep_rate(t) / ARC_LEN * V_TURN
+        _set_speed(V_TURN, omega_ff + YAW_KP * (yaw_ref - yaw))
+        step()
+    target_yaw = yaw_start + sign * math.pi / 2
+
+
+def _build_segments(plan):
+    """Ubah rencana ('F','L','R' per sel yang dilalui) menjadi segmen gerak:
+    ('S', panjang, watch) untuk lurus dan ('A', arah) untuk belok halus.
+    watch = daftar ((jenis, k), d_awal, d_akhir): jendela sensor untuk sel
+    ke-(k+1); jenis 'front' (FL/FR di tengah sel) atau 'side' (DL/DR)."""
+    n = len(plan)
+    segments = []
+    seg_watch = []
+    cur_len = CELL / 2.0   # dari tengah sel awal ke sisi keluarnya
+    prev_center = 0.0      # posisi tengah sel sebelumnya di segmen ini (None = tak ada)
+    for k in range(n):     # masuk ke sel ke-(k+1) di jarak cur_len dalam segmen
+        if prev_center is not None:
+            lo = prev_center + SIDE_SAMPLE_AT - SIDE_WINDOW / 2.0
+            seg_watch.append((("side", k), lo, lo + SIDE_WINDOW))
+        center = cur_len + CELL / 2.0
+        if k == n - 1:
+            seg_watch.append((("front", k), center - 0.008, center + 0.008))
+            segments.append(("S", center, seg_watch))
+            break
+        if plan[k + 1] == "F":
+            seg_watch.append((("front", k), center - 0.008, center + 0.008))
+            prev_center = center
+            cur_len = center + CELL / 2.0
+        else:
+            segments.append(("S", cur_len, seg_watch))
+            segments.append(("A", plan[k + 1]))
+            seg_watch = []
+            cur_len = 0.0
+            prev_center = None
+    return segments
+
+
+def run_path(plan):
+    """Jalankan rencana tanpa berhenti di tiap sel. plan = daftar aksi per sel
+    yang dilalui, relatif arah hadap sekarang: 'F' = lurus ke sel berikutnya,
+    'L'/'R' = belok halus ke kiri/kanan lalu ke sel berikutnya. Mulai di
+    tengah sel, berhenti di tengah sel terakhir. Contoh: "FFRFL".
+
+    Belok pertama (di sel awal) tidak bisa halus dari tengah sel, jadi
+    diputar di tempat dulu.
+
+    Return: daftar pengamatan per sel yang dimasuki (len(plan) buah), dict
+    dengan kunci front/left/right (True/False, atau None kalau tak teramati:
+    sel tempat belok halus tidak teramati), front_value/left_value/
+    right_value (rata-rata sensor) dan pose (posisi/arah SEBENARNYA saat
+    melewati tengah sel; hanya untuk validasi)."""
+    global offset, last_side_walls
+    plan = list(plan)
+    center()
+    if plan and plan[0] in ("L", "R"):
+        _point_turn("left" if plan[0] == "L" else "right")
+        plan[0] = "F"
+
+    segments = _build_segments(plan)
+    n = len(plan)
+    samples = {}
+    v_now = 0.0
+    for i, seg in enumerate(segments):
+        if seg[0] == "A":
+            _run_arc("left" if seg[1] == "L" else "right")
+            continue
+        _, length, watch = seg
+        v_out = V_TURN if i + 1 < len(segments) else 0.0
+        samples.update(_run_straight(length, v_now, v_out, watch))
+        v_now = v_out
+    settle()
+
+    obs = [{"front": None, "left": None, "right": None, "front_value": None,
+            "left_value": None, "right_value": None, "pose": None} for _ in range(n)]
+    for (kind, k), lst in samples.items():
+        if not lst:
+            continue
+        if kind == "front":
+            val = sum((s[0] + s[1]) / 2.0 for s in lst) / len(lst)
+            obs[k]["front"] = val > FRONT_THRESHOLD
+            obs[k]["front_value"] = val
+            obs[k]["pose"] = lst[len(lst) // 2][4]
+        else:
+            ml = sum(s[2] for s in lst) / len(lst)
+            mr = sum(s[3] for s in lst) / len(lst)
+            obs[k]["left"], obs[k]["right"] = ml > SIDE_THRESHOLD, mr > SIDE_THRESHOLD
+            obs[k]["left_value"], obs[k]["right_value"] = ml, mr
+            obs[k]["pitch"] = sum(s[5] for s in lst) / len(lst)
+    if obs:
+        obs[-1]["pose"] = _true_pose()  # posisi akhir setelah berhenti
+    offset = 0.0
+    last_side_walls = (obs[-1]["left"], obs[-1]["right"]) if obs else None
+    return obs
 
 
 if __name__ == "__main__":
     log("=== Uji primitif gerak (bukan solving maze) ===")
-    log("Urutan: maju 1 sel -> belok kanan -> maju 1 sel -> belok kiri -> maju 1 sel")
-    log("(sudah dicek lewat parser maze -- jalur ini bebas dinding di minimaze.txt)")
-    read_sensors()
-    drive_forward_cells(1)
-    read_sensors()
-    turn("right")
-    read_sensors()
-    drive_forward_cells(1)
-    read_sensors()
-    turn("left")
-    read_sensors()
-    drive_forward_cells(1)
-    read_sensors()
+    log("Rencana run_path('FRL'): maju, belok halus kanan, belok halus kiri, berhenti")
+    log("(sudah dicek lewat parser maze -- jalur ini bebas dinding di minimaze.txt;")
+    log(" robot mulai di tengah sel (0,0) menghadap Utara, berhenti di tengah sel (1,2))")
+    log_true_pose()
+    t0 = robot.getTime()
+    run_path("FRL")
+    log(f"waktu tempuh: {robot.getTime() - t0:.2f} s (simulasi)")
+    log_true_pose()
+    log("diharapkan: x=0.270 y=0.450 arah=90.0")
     log("=== Selesai. Bandingkan posisi/arah sebenarnya dengan yang diharapkan. ===")
     log("=== Robot sekarang idle (motor berhenti). ===")
 
