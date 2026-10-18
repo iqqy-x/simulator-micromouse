@@ -224,10 +224,15 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   `run_path`. Mode `MM_SEARCH=continuous` (bawaan; `search_run` di pustaka:
   tanpa berhenti, belok halus, keputusan diambil 95 mm sebelum tengah sel
   dari jendela DL/DR dan FL/FR) vs `cell` (berhenti di tiap sel). Hasil di
-  practice-8x8-a: continuous 114 langkah/176 s simulasi, peta 0 salah;
-  cell 114 langkah/351 s, peta 0 salah; lari cepat 22 langkah (optimal)
-  15.3 s, sampai di tujuan. Pembacaan sisi di sel tepat sesudah busur
-  ("terlambat") kurang andal (nilai tumpang tindih) -- lihat README.
+  practice-8x8-a: continuous 114 langkah/126 s simulasi, 16 putaran di
+  tempat, peta 0 salah; cell 114 langkah/345 s, peta 0 salah; lari cepat 22 langkah (optimal)
+  15.3 s, sampai di tujuan. Belokan beruntun: busur tetap halus di sel
+  tepat sesudah busur (`_arc_shape` menyesuaikan bentuk) dan pembacaan sisi
+  di sana memakai pola NAIK-nya nilai sinar yang lolos (`_side_wall_late`)
+  -- lihat README. Berhenti terencana di depan dinding (jalan buntu, belok di
+  sel terlambat) berhenti 19 mm lebih awal supaya tepi PCB >= 37 mm dari
+  dinding; `MM_CLEARANCE=1` mengukur jarak bebas PCB-dinding (belok halus
+  22-29 mm; satu macet 6 s di jalan buntu dengan galat lateral ~23 mm).
   Berhenti darurat (jarak aman 37 mm dari tepi depan PCB ke dinding,
   `SAFE_STOP_NOSE`; tidak maju lagi setelah rem) bila FL/FR melihat dinding
   depan mendadak (~59.5 mm sensor-dinding) saat

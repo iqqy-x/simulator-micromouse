@@ -85,22 +85,36 @@ sim/webots/
 
   | | `cell` | `continuous` |
   |---|---|---|
-  | Jelajah | 114 langkah, 351 s simulasi | 114 langkah, 176 s |
-  | Peta (sisi diketahui / salah) | 201 / 0 | 195 / 0 |
+  | Jelajah | 114 langkah, 345 s simulasi | 114 langkah, 126 s |
+  | Putar di tempat saat jelajah | tiap belokan | 16 |
+  | Peta (sisi diketahui / salah) | 201 / 0 | 201 / 0 |
   | Lari cepat | 22 langkah (optimal), 15.3 s, sampai tujuan | sama |
 
   `continuous` memakai `search_run` di pustaka: tidak berhenti di tiap sel,
   belok halus, keputusan flood fill diambil SAMBIL BERGERAK 95 mm sebelum
-  tengah tiap sel yang dimasuki (di situ busur belok harus dimulai): dinding
+  tengah tiap sel yang dimasuki (di situ busur belok dimulai): dinding
   kiri/kanan dari DL/DR (jendela 140-95 mm sebelum tengah sel) dan dinding
   depan dari FL/FR (jendela 130-95 mm; jarak 125-165 mm, nilai 120-270 vs 0
-  kalau terbuka; ambang 60). Sel PERTAMA sesudah busur ("terlambat": robot
-  baru keluar busur, jendela itu sudah lewat) memakai jendela 90-70 mm dan
-  keputusan di 70 mm sebelum tengah; di situ hanya lurus yang halus --
-  belok berarti berhenti di tengah sel lalu diputar di tempat, dan dinding
-  samping hanya dipakai bila sisi itu belum diketahui (ambang 260, sinar
-  yang lolos lewat sisi terbuka mengenai dinding depan sel tetangga pada
-  nilai ~180-210, mirip dinding samping yang terbaca 240-800 sesudah busur).
+  kalau terbuka; ambang 60).
+  **Belokan beruntun (belok lagi tepat sesudah belok):** sel pertama sesudah
+  busur ("terlambat") baru dimasuki di batas masuk, jendela di atas sudah
+  lewat. Dipakai jendela 90-70 mm sebelum tengah dan keputusan di 70 mm. Busur
+  di sel itu tetap dijalankan halus dengan BENTUK DISESUAIKAN
+  (`_arc_shape`: yaw acuan = (pi/2)*smoothstep(t)^p; p dipilih supaya ujung
+  busur tetap tepat di tengah lorong sel berikutnya walau mulai 70 mm, bukan
+  90 mm, sebelum tengah; p~0.69, panjang ~132 mm). Sebelumnya belokan
+  beruntun berhenti di tengah sel dan diputar di tempat (36 putaran per
+  jelajah; sekarang 16, sisanya jalan buntu dan arah awal tiap perjalanan).
+  **Pembacaan samping di sel terlambat** (`_side_wall_late`): nilai dinding
+  asli (240-800) dan sinar yang lolos lewat sisi terbuka ke dinding DEPAN sel
+  tetangga (180-290) tumpang tindih, tapi nilai sinar lolos NAIK ~30-50% di
+  sepanjang jendela (jaraknya mengecil ~1.4 mm per mm robot maju) sedangkan
+  dinding samping sungguhan tetap atau turun. Dinding = nilai rata-rata >140
+  dan tidak naik >12%. Kalau sisi lawan sangat dekat (>700, robot miring >22
+  mm) dan sisi ini ambigu (naik, 140-330), dianggap DINDING (aman; pembacaan
+  normal boleh menimpa, pembacaan terlambat hanya mengisi sisi yang belum
+  diketahui). Hasil: 1 pembacaan salah di log (dianggap dinding padahal
+  terbuka), peta akhir 0 salah.
   **Meluruskan di sel start:** robot mundur 75 mm (jarak ke dinding belakang
   55 mm + 20 mm); kalau miring 6 derajat, dinding meluruskannya kembali ke
   90.00 derajat (uji `MM_START_TILT_DEG=6`); arah acuan gyro di-reset lalu
@@ -121,10 +135,24 @@ sim/webots/
   terpicu (0 kali). Pantauan tidak aktif di busur belok dan di tahap
   berhenti terencana (jalan buntu, tujuan; di tengah sel tepi PCB 18 mm dari
   dinding).
-  **Keterbatasan:** pembacaan samping di sel terlambat tumpang tindih
-  (dinding asli 241-800 vs salah baca 184-287), jadi satu-dua sisi bisa salah
-  (di run normal terakhir peta 0 salah, tapi uji lain menunjukkan hasil yang masih berubah-ubah); pembacaan
-  normal di kunjungan lain menimpanya. Putar balik (jalan buntu) berhenti di
+  **Jarak bebas PCB-dinding (`MM_CLEARANCE=1` mencatat tiap kejadian < 30 mm
+  dari pose sebenarnya):** di belok halus tepi PCB (sudut depan sisi luar)
+  lewat 22-29 mm dari dinding depan (geometri busur 90 mm; di bawah batas
+  berhenti 37 mm, tapi itu jarak berhenti, bukan jarak lewat). Berhenti
+  terencana (jalan buntu, belok di sel terlambat) dulu berhenti di tengah sel
+  (tepi PCB 18 mm dari dinding depan, putar di tempat menyenggol dinding
+  samping sampai 0 mm); sekarang kalau ada dinding depan robot berhenti
+  `SAFE_STOP_NOSE + PCB_FRONT_AHEAD - HALF_LANE` = 19 mm LEBIH AWAL (tepi PCB
+  37 mm dari dinding), putar di tempat tersisa jarak bebas 17-23 mm di
+  sebagian besar jalan buntu. Masih ada satu kasus macet 6 s (jalan buntu
+  (8,0), galat lateral ~23 mm saat tiba): lorong 168 mm dengan radius putar PCB
+  ~66 mm hanya menyisakan 18 mm toleransi lateral. Strip tabrakan kubah depan
+  dinaikkan 7 -> 24 supaya outline simulasi lebih dekat ke outline PCB.
+  **Keterbatasan:** keputusan samping di sel terlambat bergantung pada pola nilai
+  sensor dan ambang yang dikalibrasi ke kurva perkiraan; pada robot asli
+  perlu diuji ulang. Pembacaan ambigu dibuat konservatif (dinding), jadi
+  rute bisa lebih panjang dari optimal bila dinding tampak ada padahal
+  tidak (belum terjadi di uji ini). Putar balik (jalan buntu) berhenti di
   tengah sel dan diputar 180 derajat di tempat. Tidak ada deteksi macet.
   `MM_MAZE=<file>` memilih labirin lain (generate dunianya dari file yang
   sama), `MM_MAX_TRIPS` membatasi jumlah perjalanan.

@@ -65,7 +65,7 @@ BODY_DOME_Y0_MM = 59.9       # mulai lengkung sudut atas
 BODY_TOP_Y_MM = 94.9
 BODY_CORNER_R_MM = 35.0
 BODY_FLAT_HALF_MM = 5.0      # setengah lebar bagian datar di ujung depan
-BODY_DOME_STRIPS = 7
+BODY_DOME_STRIPS = 24
 
 # Tinggi (dari lantai) diukur dari model 3D badan (meshes/body.obj; lantai =
 # dasar roda): bidang bawah PCB 6.5 mm, atas PCB 8.1 mm, komponen tertinggi

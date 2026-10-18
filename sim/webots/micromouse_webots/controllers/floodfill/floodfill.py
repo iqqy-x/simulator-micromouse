@@ -306,7 +306,10 @@ class Explorer:
             flag = "" if seen is None or seen == truth else " <-- SALAH"
             parts.append(f"{label}={'?' if seen is None else int(seen)}(nilai {val if val is None else round(val)},"
                          f" benar {int(truth)}){flag}")
-        c.log(f"FLOOD sel ({self.x},{self.y}) arah {NAME[self.h]}: " + "  ".join(parts))
+        c.log(f"FLOOD sel ({self.x},{self.y}) arah {NAME[self.h]}"
+              f"{' (terlambat)' if obs.get('late') else ''}: " + "  ".join(parts))
+        if any("SALAH" in q for q in parts):
+            c.log(f"FLOOD   urutan nilai kiri={obs.get('left_seq')} kanan={obs.get('right_seq')}")
 
     def search_to(self, goals):
         """Jelajah berkelanjutan dari tengah sel sekarang sampai sel tujuan."""
@@ -380,7 +383,97 @@ def truth_shortest(start, goals):
     return None
 
 
+class Clearance:
+    """Jarak bebas terkecil antara OUTLINE PCB dan dinding, dihitung tiap langkah
+    simulasi dari pose sebenarnya (hanya untuk validasi; MM_CLEARANCE=1)."""
+
+    def __init__(self):
+        import maze_to_webots as m
+        self.m = m
+        cell, t = c.CELL, 0.012
+        self.boxes = []
+        for r in range(m_rows + 1):
+            for x in range(m_width):
+                if m_horiz[r][x]:
+                    cy = (m_rows - r) * cell
+                    self.boxes.append(((x + 0.5) * cell - cell / 2, cy - t / 2, (x + 0.5) * cell + cell / 2, cy + t / 2))
+        for r in range(m_rows):
+            yc = m_rows - 1 - r
+            for x in range(m_width + 1):
+                if m_vert[r][x]:
+                    cx = x * cell
+                    self.boxes.append((cx - t / 2, (yc + 0.5) * cell - cell / 2, cx + t / 2, (yc + 0.5) * cell + cell / 2))
+        # titik outline: sudut tiap strip body, frame robot (x depan, y kiri), meter
+        self.pts = []
+        for lo, hi, hw in m.body_blocks():
+            for py in (lo, hi):
+                for sgn in (1, -1):
+                    self.pts.append(((py - m.AXLE_PCB_MM[1]) / 1000.0, sgn * hw / 1000.0))
+        self.min_all = (9.0, None)
+        self.min_moving = (9.0, None)
+        self.min_still = (9.0, None)
+        self.last = None
+        self.ev = None
+        self.ev_count = 0
+
+    def sample(self, label):
+        x, y, _ = c.self_node.getPosition()
+        r = c.self_node.getOrientation()
+        v = c.self_node.getVelocity()
+        speed = math.hypot(v[0], v[1])
+        best = 9.0
+        for px, py in self.pts:
+            wx = x + r[0] * px + r[1] * py
+            wy = y + r[3] * px + r[4] * py
+            for (x0, y0, x1, y1) in self.boxes:
+                if x0 - 0.1 < wx < x1 + 0.1 and y0 - 0.1 < wy < y1 + 0.1:
+                    dx = max(x0 - wx, 0.0, wx - x1)
+                    dy = max(y0 - wy, 0.0, wy - y1)
+                    best = min(best, math.hypot(dx, dy))
+        info = (round(best * 1000, 1), (round(x, 3), round(y, 3), round(math.degrees(math.atan2(r[3], r[0])), 0),
+                                       round(speed, 2), round(c.robot.getTime(), 1)))
+        if best < self.min_all[0] / 1000.0 * 1000 and best * 1000 < self.min_all[0]:
+            self.min_all = (best * 1000, info[1])
+        if speed < 0.03 and best * 1000 < self.min_still[0]:
+            self.min_still = (best * 1000, info[1])
+        if speed >= 0.03 and best * 1000 < self.min_moving[0]:
+            self.min_moving = (best * 1000, info[1])
+        # kejadian "dekat dinding" (< 30 mm): catat awal/akhir dan jarak terkecil
+        t = c.robot.getTime()
+        if best < 0.030:
+            cell = (int(x // c.CELL), int(y // c.CELL))
+            if self.ev is None:
+                self.ev = {"t0": t, "min": best, "cell": cell, "speed": speed,
+                           "head": math.degrees(math.atan2(r[3], r[0]))}
+            elif best < self.ev["min"]:
+                self.ev.update(min=best, cell=cell, speed=speed,
+                               head=math.degrees(math.atan2(r[3], r[0])))
+            self.ev["t1"] = t
+        elif self.ev is not None:
+            e = self.ev
+            if self.ev_count < 60:
+                c.log("FLOOD dekat dinding: t=%.1f-%.1f s  jarak min %.1f mm  sel %s  arah %.0f  kecepatan %.2f m/s"
+                      % (e["t0"], e["t1"], e["min"] * 1000, e["cell"], e["head"], e["speed"]))
+            self.ev_count += 1
+            self.ev = None
+        return best
+
+    def report(self):
+        for name, (d, where) in (("keseluruhan", self.min_all), ("saat bergerak", self.min_moving),
+                                 ("saat diam/berputar di tempat", self.min_still)):
+            c.log(f"FLOOD jarak bebas PCB-dinding terkecil {name}: {d:.1f} mm di (x,y,arah,kecepatan,waktu)={where}")
+
+
 def main():
+    clearance = None
+    if os.environ.get("MM_CLEARANCE"):
+        clearance = Clearance()
+        orig_step = c.step
+
+        def traced():
+            orig_step()
+            clearance.sample("")
+        c.step = traced
     ex = Explorer()
     t_start = c.robot.getTime()
     c.log(f"FLOOD labirin {WIDTH}x{HEIGHT} dari {os.path.basename(MAZE_FILE)}, "
@@ -390,6 +483,8 @@ def main():
     explore = ex.search_to if SEARCH_MODE == "continuous" else ex.explore_to
     c.log(f"FLOOD mode jelajah: {SEARCH_MODE}")
     ex.prepare_start()
+    if clearance:   # menempel dinding belakang di sel start disengaja: jangan dihitung
+        clearance.min_all = clearance.min_moving = clearance.min_still = (9000.0, None)
     t_scan = c.robot.getTime()
     c.log(f"FLOOD persiapan sel start selesai ({t_scan - t_start:.1f} s)")
 
@@ -412,6 +507,8 @@ def main():
     if (ex.x, ex.y) != ex.start_cell:
         explore({ex.start_cell})
     t_explored = c.robot.getTime()
+    if clearance:
+        clearance.report()
     c.log(f"FLOOD henti darurat: {ex.blocked_events} kali")
     c.log(f"FLOOD jelajah selesai: {ex.steps} langkah, {t_explored - t_start:.1f} s, "
           f"jalur {'TERBUKTI optimal' if certified else 'belum terbukti optimal (batas perjalanan)'}")

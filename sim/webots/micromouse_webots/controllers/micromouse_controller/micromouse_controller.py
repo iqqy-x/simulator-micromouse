@@ -462,6 +462,48 @@ def _arc_length():
 ARC_LEN = _arc_length()
 
 
+_ARC_SHAPES = {}
+
+
+def _arc_shape(forward, lateral=CELL / 2.0):
+    """Bentuk busur yang menempuh `forward` m ke depan dan `lateral` m ke samping.
+    Yaw acuan = (pi/2) * smoothstep(t)**p terhadap jarak busur; p=1 -> simetris
+    (maju = samping, busur standar); p<1 memutar lebih awal (lebih banyak
+    ke samping dibanding ke depan), dipakai kalau busur harus dimulai lebih
+    dekat ke tengah sel. Return (p, panjang) atau None kalau tak mungkin."""
+    key = round(forward, 4)
+    if key in _ARC_SHAPES:
+        return _ARC_SHAPES[key]
+    n = 600
+
+    def integrals(p):
+        cs = sn = 0.0
+        for i in range(n):
+            th = (math.pi / 2) * _smoothstep((i + 0.5) / n) ** p
+            cs += math.cos(th)
+            sn += math.sin(th)
+        return cs / n, sn / n
+
+    target = lateral / forward
+    lo, hi = 0.5, 2.5
+    r_lo = integrals(lo)[1] / integrals(lo)[0]
+    r_hi = integrals(hi)[1] / integrals(hi)[0]
+    if not (r_hi <= target <= r_lo):
+        _ARC_SHAPES[key] = None
+        return None
+    for _ in range(40):
+        mid = (lo + hi) / 2.0
+        cs, sn = integrals(mid)
+        if sn / cs > target:
+            lo = mid
+        else:
+            hi = mid
+    p = (lo + hi) / 2.0
+    result = (p, lateral / integrals(p)[1])
+    _ARC_SHAPES[key] = result
+    return result
+
+
 def _distance_since(l0, r0):
     """Jarak tempuh pusat robot (m) sejak encoder bernilai (l0, r0)."""
     return ((left_enc.getValue() - l0) + (right_enc.getValue() - r0)) / 2.0 * WHEEL_R
@@ -512,21 +554,28 @@ def _run_straight(length, v_in, v_out, watch, vmax=None, front_stop=None):
     return got
 
 
-def _run_arc(direction, v=None):
+def _run_arc(direction, v=None, forward=None):
     """Belok halus 90 derajat dengan V_TURN: yaw acuan mengikuti smoothstep
     terhadap jarak busur, ditambah umpan maju laju putar."""
     global target_yaw
     v = V_TURN if v is None else v
+    p, arc_len = 1.0, ARC_LEN
+    if forward is not None and abs(forward - CELL / 2.0) > 0.002:
+        shape = _arc_shape(forward)
+        if shape is None:
+            raise ValueError(f"busur tak mungkin untuk maju={forward:.3f} m")
+        p, arc_len = shape
     sign = 1.0 if direction == "left" else -1.0
     yaw_start = target_yaw
     l0, r0 = left_enc.getValue(), right_enc.getValue()
     while True:
         s = _distance_since(l0, r0)
-        if s >= ARC_LEN - END_TOL:
+        if s >= arc_len - END_TOL:
             break
-        t = s / ARC_LEN
-        yaw_ref = yaw_start + sign * (math.pi / 2) * _smoothstep(t)
-        omega_ff = sign * (math.pi / 2) * _smoothstep_rate(t) / ARC_LEN * v
+        t = s / arc_len
+        sm = max(_smoothstep(t), 1e-9)
+        yaw_ref = yaw_start + sign * (math.pi / 2) * sm ** p
+        omega_ff = sign * (math.pi / 2) * p * sm ** (p - 1.0) * _smoothstep_rate(t) / arc_len * v
         _set_speed(v, omega_ff + YAW_KP * (yaw_ref - yaw))
         step()
     target_yaw = yaw_start + sign * math.pi / 2
@@ -648,6 +697,7 @@ LATE_DECIDE_BEFORE = 0.07
 # SENSOR_TO_NOSE di belakang ujung PCB, dan rem masih menempuh BRAKE_MARGIN
 # (terukur 1-2 mm + noise sensor), jadi pemicu dipasang lebih jauh dari itu.
 SAFE_STOP_NOSE = 0.037     # m, jarak berhenti aman: tepi depan PCB ke dinding
+PCB_FRONT_AHEAD = 0.066     # m, ujung depan PCB di depan sumbu roda
 SENSOR_TO_NOSE = 0.0185    # m, ujung PCB (66 mm) - sensor FL/FR (47.5 mm) dari sumbu roda
 BRAKE_MARGIN = 0.004       # m, jarak rem + toleransi pembacaan
 SAFE_STOP_SENSOR = SAFE_STOP_NOSE + SENSOR_TO_NOSE            # jarak sensor-dinding minimum
@@ -660,7 +710,44 @@ FRONT_STOP_VALUE = (SENSOR_ADC_MAX / (1.0 + ((SAFE_STOP_SENSOR + BRAKE_MARGIN) /
 SIDE_THRESHOLD_LATE = 260.0
 
 
-def _early_observation(got, key_side, key_front, side_threshold=SIDE_THRESHOLD):
+def _sensor_value(distance):
+    """Nilai sensor untuk jarak sinar tertentu (kurva respons)."""
+    return SENSOR_ADC_MAX / (1.0 + (distance / SENSOR_D0) ** 2) - SENSOR_FLOOR
+
+
+SIDE_LATE_MIN = 140.0   # nilai rata-rata minimum agar dianggap dinding di sel terlambat
+RISING_RATIO = 1.12     # nilai separuh akhir jendela > rasio * separuh awal -> sinar makin dekat
+
+
+VERY_CLOSE_WALL = 700.0   # nilai sisi lawan di atas ini: robot sangat dekat ke dinding itu (>~22 mm dari tengah)
+AMBIGUOUS_MAX = 330.0     # di bawah ini (dan di atas SIDE_LATE_MIN) nilai tak bisa dibedakan dari salah baca
+
+
+def _side_wall_late(values, other_mean=0.0):
+    """Dinding samping di sel tepat sesudah busur dari urutan nilai sensor di jendela.
+    Dinding samping sungguhan sejajar arah gerak: jaraknya (nilainya) tetap selama
+    robot maju. Sinar yang lolos lewat sisi terbuka mengenai dinding DEPAN sel
+    tetangga: jaraknya mengecil ~1.4 mm per mm robot maju, jadi nilainya NAIK
+    cepat di sepanjang jendela. Nilai yang naik = bukan dinding samping, walau
+    rata-ratanya mirip (180-290 vs dinding asli 240-800)."""
+    n = len(values)
+    mean = sum(values) / n
+    rising = False
+    if n >= 4:
+        h = n // 2
+        first = sum(values[:h]) / h
+        last = sum(values[-h:]) / h
+        rising = last > RISING_RATIO * first
+    if rising and mean > SIDE_LATE_MIN and mean < AMBIGUOUS_MAX and other_mean > VERY_CLOSE_WALL:
+        # Robot sangat miring ke sisi lawan, jadi dinding sisi ini yang SUNGGUHAN pun
+        # terbaca kecil dan naik (robot sedang dikoreksi ke tengah): sama dengan
+        # sinar lolos ke dinding depan sel tetangga. Tak bisa dibedakan -> anggap
+        # dinding (aman: tidak akan belok ke dinding; pembacaan normal bisa menimpa).
+        return True
+    return mean > SIDE_LATE_MIN and not rising
+
+
+def _early_observation(got, key_side, key_front, side_threshold=SIDE_THRESHOLD, late=False):
     out = {"front": None, "left": None, "right": None,
            "front_value": None, "left_value": None, "right_value": None}
     front = got.get(key_front) or []
@@ -671,8 +758,14 @@ def _early_observation(got, key_side, key_front, side_threshold=SIDE_THRESHOLD):
     if side:
         ml = sum(x[2] for x in side) / len(side)
         mr = sum(x[3] for x in side) / len(side)
-        out["left"], out["right"] = ml > side_threshold, mr > side_threshold
+        if late:
+            out["left"] = _side_wall_late([x[2] for x in side], mr)
+            out["right"] = _side_wall_late([x[3] for x in side], ml)
+        else:
+            out["left"], out["right"] = ml > side_threshold, mr > side_threshold
         out["left_value"], out["right_value"] = ml, mr
+        out["left_seq"] = [round(x[2]) for x in side]
+        out["right_seq"] = [round(x[3]) for x in side]
     return out
 
 
@@ -736,8 +829,7 @@ def search_run(on_cell, on_blocked=None):
             v_in = 0.0
             prev_before = None
             continue
-        obs = _early_observation(got, ("side", 0), ("front", 0),
-                                 SIDE_THRESHOLD_LATE if late else SIDE_THRESHOLD)
+        obs = _early_observation(got, ("side", 0), ("front", 0), SIDE_THRESHOLD, late)
         obs["late"] = late
         cells += 1
         action = on_cell(obs)
@@ -747,13 +839,20 @@ def search_run(on_cell, on_blocked=None):
             to_center = (to_center - s_dec) + CELL
             v_in = V_SEARCH
             continue
-        if action in ("L", "R") and not late:
-            _run_arc("left" if action == "L" else "right", v=V_SEARCH)
+        if action in ("L", "R") and _arc_shape(before) is not None:
+            # busur dimulai `before` m sebelum tengah sel dan berakhir tepat di
+            # tengah sisi sel (bentuk disesuaikan, titik akhir tetap di tengah
+            # lorong sel berikutnya, juga di sel "terlambat")
+            _run_arc("left" if action == "L" else "right", v=V_SEARCH, forward=before)
             to_center = CELL / 2.0   # keluar busur di batas masuk sel berikutnya
             v_in = V_SEARCH
             continue
-        # berhenti di tengah sel C
-        _run_straight(to_center - s_dec, V_SEARCH, 0.0, [], vmax=V_SEARCH)
+        # berhenti di tengah sel C. Kalau ada dinding depan, berhenti LEBIH AWAL
+        # supaya tepi depan PCB tetap >= SAFE_STOP_NOSE dari dinding (di tengah sel
+        # tepi PCB hanya HALF_LANE - 0.066 = 18 mm dari dinding depan). Sesudah
+        # diputar di tempat, selisihnya jadi galat lateral yang dikoreksi pemusatan.
+        stop_back = max(0.0, SAFE_STOP_NOSE + PCB_FRONT_AHEAD - HALF_LANE) if obs.get("front") else 0.0
+        _run_straight(max(to_center - s_dec - stop_back, 0.0), V_SEARCH, 0.0, [], vmax=V_SEARCH)
         settle()
         if action == "STOP":
             return cells
