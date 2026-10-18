@@ -94,6 +94,19 @@ plan = to_plan(path)
 c.log("WALLTEST maze=practice-8x8-a  jalur=" + " ".join(path) + f"  ({len(path)} langkah)")
 c.log("WALLTEST rencana relatif=" + plan)
 
+shift = float(os.environ.get("MM_START_SHIFT_MM", "0")) / 1000.0
+if shift:
+    # uji konvergensi: geser robot ke Timur (searah sumbu x dunia) dari tengah sel start
+    c.self_node.getField("translation").setSFVec3f([0.5 * c.CELL + shift, 0.5 * c.CELL, c.WHEEL_R])
+    c.self_node.resetPhysics()
+    c.log(f"WALLTEST robot digeser {shift * 1000:.0f} mm ke Timur dari tengah sel start")
+if os.environ.get("MM_GAINS"):  # "kp,ki,kd" untuk menyetel pemusatan
+    c.CENTER_KP, c.CENTER_KI, c.CENTER_KD = (float(v) for v in os.environ["MM_GAINS"].split(","))
+    c.log(f"WALLTEST gain pemusatan kp={c.CENTER_KP} ki={c.CENTER_KI} kd={c.CENTER_KD}")
+if os.environ.get("MM_NO_CENTER"):
+    c.CENTER_ENABLED = False
+    c.log("WALLTEST pemusatan DL/DR DIMATIKAN")
+
 t0 = c.robot.getTime()
 obs = c.run_path(plan)
 elapsed = c.robot.getTime() - t0

@@ -200,8 +200,9 @@ mana saja. Jadi simulator ini cuma cocok buat latihan gaya "classic".
   Pusat massa robot di sumbu roda + 8 mm ke depan (`ROBOT_COM_X/Z` di
   generator): pusat massa di bawah sumbu membuat moncong terangkat 7-20°
   saat melaju. Hasil `run_path` di practice-8x8-a: 15.3 s, rata-rata
-  0.26 m/s, galat arah <1°, galat posisi ke samping menumpuk sampai 27 mm
-  (belum ada koreksi dinding).
+  0.26 m/s, galat arah <1°. Pemusatan lateral PID dengan DL/DR
+  (`CENTER_*`, di jalur lurus): galat posisi ke samping maks 30 -> 14 mm,
+  rata-rata 17 -> 7.6 mm; galat sepanjang jalur belum dikoreksi.
 - **Gaya belok** `TURN_STYLE`: `"pivot"` (bawaan, satu roda berputar, roda
   lain diam; pusat bergeser `PIVOT_RADIUS` 40 mm sehingga `turn()` mundur
   dulu dan melacak `offset`; galat menumpuk ~1.3 mm/belokan) atau

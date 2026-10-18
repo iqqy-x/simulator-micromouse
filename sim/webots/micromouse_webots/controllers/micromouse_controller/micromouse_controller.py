@@ -333,6 +333,83 @@ YAW_KP = 8.0         # (rad/s) per rad: koreksi arah saat lurus dan di belokan
 END_TOL = 0.0005     # m toleransi akhir segmen (encoder)
 
 
+# --- Pemusatan lateral dengan DL/DR (PID bertingkat) -------------------------
+# Galat lateral e (m, + = robot di KIRI tengah lorong) dihitung dari jarak sinar
+# DL/DR ke dinding. Hasil PID pada e menjadi OFFSET arah (rad) yang ditambahkan
+# ke yaw acuan; loop yaw (gyro, YAW_KP) di dalamnya menjalankan offset itu.
+# Hanya aktif di jalur lurus dan hanya bila ada dinding yang terukur.
+CENTER_ENABLED = True
+CENTER_KP = 6.0        # rad per m galat
+CENTER_KI = 2.0        # rad per (m*s)
+CENTER_KD = 0.3        # rad per (m/s)
+CENTER_MAX = 0.20      # rad batas offset arah (~11 derajat)
+CENTER_I_MAX = 0.02    # m*s batas integral (anti-windup)
+CENTER_FILTER = 0.4    # bobot sampel baru pada penyaring galat
+CENTER_VALID_MIN = 70.0   # nilai sensor di bawah ini dianggap "tidak ada dinding"
+HALF_LANE = 0.084      # m, setengah lebar lorong dalam (CELL/2 - tebal dinding/2)
+SENSOR_LAT = 0.0095    # m, DL/DR di samping sumbu tengah (sama dengan generator)
+SIN45 = math.sin(math.pi / 4)
+# Kurva respons sensor perkiraan -- HARUS sama dengan maze_to_webots.py
+# (SENSOR_ADC_MAX, SENSOR_D0, SENSOR_RANGE).
+SENSOR_ADC_MAX = 4095.0
+SENSOR_D0 = 0.04
+SENSOR_FLOOR = SENSOR_ADC_MAX / (1.0 + (0.25 / SENSOR_D0) ** 2)
+
+
+def _sensor_distance(value):
+    """Jarak sinar (m) dari nilai sensor, kebalikan kurva respons."""
+    return SENSOR_D0 * math.sqrt(max(SENSOR_ADC_MAX / (value + SENSOR_FLOOR) - 1.0, 0.0))
+
+
+def _lateral_error():
+    """Galat lateral (m, + = robot di kiri tengah lorong) dari DL dan DR,
+    atau None kalau tak ada dinding yang terukur. Dua dinding: setengah
+    selisih jarak ke kiri dan kanan; satu dinding: terhadap setengah lebar
+    lorong nominal (sama nilainya kalau lorong nominal, jadi tidak melompat
+    saat salah satu dinding hilang)."""
+    vl = sensors["ds_dl"].getValue()
+    vr = sensors["ds_dr"].getValue()
+    y_left = SENSOR_LAT + SIN45 * _sensor_distance(vl) if vl > CENTER_VALID_MIN else None
+    y_right = SENSOR_LAT + SIN45 * _sensor_distance(vr) if vr > CENTER_VALID_MIN else None
+    if y_left is not None and y_right is not None:
+        return (y_right - y_left) / 2.0
+    if y_left is not None:
+        return HALF_LANE - y_left
+    if y_right is not None:
+        return y_right - HALF_LANE
+    return None
+
+
+class _Centering:
+    """PID galat lateral -> offset arah (rad). Dibuat baru di tiap segmen lurus."""
+
+    def __init__(self):
+        self.e = None        # galat tersaring
+        self.integral = 0.0
+        self.cmd = 0.0
+
+    def update(self):
+        if not CENTER_ENABLED:
+            return 0.0
+        e = _lateral_error()
+        if e is None:
+            # tak ada dinding: offset memudar halus ke nol
+            self.cmd *= 0.9
+            self.integral *= 0.95
+            return self.cmd
+        if self.e is None:
+            self.e = e
+            de = 0.0
+        else:
+            prev = self.e
+            self.e += CENTER_FILTER * (e - self.e)
+            de = (self.e - prev) / DT
+        self.integral = max(-CENTER_I_MAX, min(CENTER_I_MAX, self.integral + self.e * DT))
+        raw = -(CENTER_KP * self.e + CENTER_KI * self.integral + CENTER_KD * de)
+        self.cmd = max(-CENTER_MAX, min(CENTER_MAX, raw))
+        return self.cmd
+
+
 def _smoothstep(t):
     return t * t * (3.0 - 2.0 * t)
 
@@ -377,6 +454,7 @@ def _run_straight(length, v_in, v_out, watch):
     jarak tempuh d di dalam jendela; return dict kunci -> daftar sampel."""
     l0, r0 = left_enc.getValue(), right_enc.getValue()
     got = {key: [] for key, _, _ in watch}
+    centering = _Centering()
     while True:
         d = _distance_since(l0, r0)
         for key, lo, hi in watch:
@@ -389,7 +467,8 @@ def _run_straight(length, v_in, v_out, watch):
         v = min(V_CRUISE,
                 math.sqrt(v_in * v_in + 2.0 * ACCEL_LIN * d),
                 math.sqrt(v_out * v_out + 2.0 * ACCEL_LIN * max(length - d, 0.0)))
-        _set_speed(max(v, V_MIN), YAW_KP * (target_yaw - yaw))
+        offset_yaw = centering.update()
+        _set_speed(max(v, V_MIN), YAW_KP * (target_yaw + offset_yaw - yaw))
         step()
     return got
 

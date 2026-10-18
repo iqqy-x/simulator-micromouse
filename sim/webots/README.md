@@ -60,10 +60,9 @@ sim/webots/
   Belok pertama di sel start diputar di tempat (tidak bisa halus dari tengah
   sel). Hasil di practice-8x8-a (22 langkah, 11 belokan halus): 15.3 s
   simulasi, kecepatan rata-rata 0.26 m/s (gerak per sel sebelumnya 0.07 m/s
-  jelajah dengan berhenti tiap sel). Galat arah di tengah sel <1 derajat;
-  galat posisi menumpuk ke SAMPING (maks 27 mm dari tengah sel setelah 11
-  belokan, rata-rata 16 mm) karena belum ada koreksi dinding -- langkah
-  berikutnya (pemusatan dengan DL/DR dan penyelarasan dinding depan).
+  jelajah dengan berhenti tiap sel). Tanpa pemusatan: galat arah di tengah sel <1 derajat tapi galat
+  posisi menumpuk ke SAMPING (maks 30 mm, rata-rata 17 mm setelah 11 belokan).
+  Dengan pemusatan DL/DR (di bawah): maks 14 mm, rata-rata 7.6 mm.
   Sel tempat belok halus tidak teramati sensornya.
 - **Gerak per sel (`drive_forward_cells`, `turn`, tetap tersedia): jarak dari encoder,
   sudut dari gyro (MPU6050), arah acuan mutlak.** Hasil uji (posisi
@@ -71,6 +70,23 @@ sim/webots/
   kiri x2, maju, belok kanan x2 = 40 belokan) berakhir 2 mm dari titik awal
   dan arah meleset <1 derajat -- tidak menumpuk karena tiap belok
   menambah +-90 derajat ke arah acuan dan saat maju yaw dikoreksi ke acuan.
+- **Pemusatan lateral dengan DL/DR (PID bertingkat, `CENTER_*`)**: di jalur
+  lurus, galat lateral e (m, + = robot di kiri tengah lorong) dihitung dari
+  jarak sinar DL/DR ke dinding (kebalikan kurva respons sensor; dua dinding:
+  setengah selisih jarak kiri-kanan; satu dinding: terhadap setengah lebar
+  lorong nominal 84 mm; nilai sensor <70 dianggap tak ada dinding, kalau
+  keduanya tak ada koreksi memudar ke nol). PID pada e (kp 6 rad/m, ki 2,
+  kd 0.3, offset maks 0.2 rad, integral dibatasi) menghasilkan OFFSET yaw
+  yang ditambahkan ke yaw acuan; loop yaw gyro (`YAW_KP`) di dalamnya
+  menjalankannya. Tidak aktif di busur belok. Hasil di wall_test (22 sel,
+  11 belokan halus): galat posisi di tengah sel maks 29.6 -> 14.4 mm,
+  rata-rata 17.3 -> 7.6 mm; galat arah maks 2.4 derajat (sengaja miring saat
+  mengoreksi). Dari awal digeser 20 mm: 20 -> 10 mm setelah satu sel (tanpa
+  pemusatan tetap 20 mm). Gain 6-14 hampir sama hasilnya; dipakai yang
+  konservatif. Sisa galat terbesar ada tepat setelah belokan (lurus 1 sel
+  terlalu pendek untuk mengoreksi penuh); galat SEPANJANG jalur (maks ~11 mm)
+  belum dikoreksi (butuh tepi dinding / dinding depan). Env var uji:
+  `MM_NO_CENTER=1`, `MM_START_SHIFT_MM=20`, `MM_GAINS=kp,ki,kd`.
 - **Pembacaan dinding: dengan `run_path` 33/33 benar pada sel yang teramati
   (sel lurus; sel belok halus dan sel start tidak teramati); dengan gerak per
   sel (`sense_walls()`, `read_front_wall()`) 66/66 benar** di practice-8x8-a (`wall_test`: robot menyusuri jalur
