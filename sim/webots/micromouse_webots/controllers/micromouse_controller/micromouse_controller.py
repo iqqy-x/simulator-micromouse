@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """
 Primitif gerak low-level untuk micromouse kontinu di Webots: "maju N sel" dan
-"belok 90 derajat", pakai feedback encoder roda (PositionSensor) supaya
-presisi -- bukan cuma kecepatan+waktu tebakan.
+"belok 90 derajat". Jarak dari encoder roda, SUDUT dari gyro (MPU6050 di PCB).
 
-Ini LAPISAN KENDALI, bukan algoritma navigasi. Rencananya planner yang
-sudah ada (flood-fill/A*/Q-table, format mms) dipakai ulang tanpa berubah --
-dia cuma manggil drive_forward_cells(1)/turn("left"/"right") alih-alih
-mengirim perintah "moveForward"/"turnLeft" lewat stdin/stdout ke mms.
+Kenapa gyro: belok di tempat hanya dengan hitungan encoder meleset (roda
+slip; uji awal: encoder 'sampai' tapi badan baru berputar 59 dari 90 derajat).
+Sama seperti robot asli, arah acuan (target_yaw) dijaga mutlak: tiap belok
+menambah +-90 derajat ke acuan, dan saat maju robot dikoreksi supaya
+yaw mengikuti acuan, jadi error tidak menumpuk.
 
-Urutan di bawah ini cuma UJI COBA primitif (maju 2 sel, belok kanan, maju 1
-sel) -- bukan algoritma solving maze. Lihat run_log.txt setelah dijalankan
-untuk angka presisinya (target vs tercapai).
+Ini LAPISAN KENDALI, bukan algoritma navigasi. Rencananya planner yang sudah
+ada (flood-fill/A*/Q-table, format mms) dipakai ulang tanpa berubah -- dia
+cuma manggil drive_forward_cells(1)/turn("left"/"right") alih-alih mengirim
+perintah "moveForward"/"turnLeft" lewat stdin/stdout ke mms.
+
+Urutan di bawah ini cuma UJI COBA primitif (maju, belok kanan, maju, belok
+kiri, maju) -- bukan algoritma solving maze. Lihat run_log.txt setelah
+dijalankan: tiap baris mencatat posisi/arah SEBENARNYA dari Supervisor
+(hanya untuk validasi, tidak dipakai navigasi) dan 4 nilai sensor mentah.
 """
 
 import math
@@ -20,6 +26,7 @@ import os
 from controller import Supervisor
 
 TIME_STEP = 16
+DT = TIME_STEP / 1000.0
 
 # Harus sama dengan generate_robot() di sim/webots/tools/maze_to_webots.py --
 # kalau maze di-generate ulang dengan --category halfsize, CELL perlu
@@ -29,7 +36,18 @@ WHEEL_R = 0.017      # N20 wheel 34x7
 TRACK_HALF = 0.0365  # jarak antar roda 73 mm (poros di PCB x=3.5 dan 76.5)
 
 CRUISE_SPEED = 4.0   # rad/s roda saat maju lurus (maks motor 31.4 rad/s)
-TURN_SPEED = 3.0     # rad/s roda saat belok di tempat
+MIN_SPEED = 0.8      # rad/s roda saat merayap mendekati target
+ACCEL = 20.0         # rad/s^2 batas percepatan roda
+DECEL_GAIN = 2.0     # kecepatan = gain * sisa rotasi roda (rad), dibatasi di atas
+STOP_TOL = 0.03      # rad rotasi roda (~0.5 mm) -- dianggap sampai
+
+TURN_SPEED = 3.0     # rad/s roda maksimum saat belok di tempat
+TURN_MIN = 0.5       # rad/s roda minimum saat belok (mendekati target)
+TURN_GAIN = 6.0      # rad/s roda per radian sisa sudut
+TURN_TOL = math.radians(0.5)
+HEADING_KP = 10.0    # rad/s roda per radian error arah saat maju lurus
+
+SETTLE_STEPS = 6     # langkah tunggu setelah berhenti supaya robot diam
 
 # Sensor PCB: FL/FR menghadap depan, DL/DR diagonal 45 derajat. Ambang
 # dinding BELUM ada -- tunggu kalibrasi dari nilai mentah di run_log.txt.
@@ -62,12 +80,38 @@ right_enc = robot.getDevice("right_wheel_sensor")
 left_enc.enable(TIME_STEP)
 right_enc.enable(TIME_STEP)
 
+gyro = robot.getDevice("gyro")
+gyro.enable(TIME_STEP)
+
 sensors = {name: robot.getDevice(name) for name in SENSOR_NAMES}
 for ds in sensors.values():
     ds.enable(TIME_STEP)
 
+yaw = 0.0         # integrasi gyro sumbu Z (rad), + = ke kiri
+target_yaw = 0.0  # arah acuan mutlak; berubah +-90 derajat tiap belok
+
+
+def step():
+    """Satu langkah simulasi + integrasi gyro. Semua tunggu lewat sini."""
+    global yaw
+    if robot.step(TIME_STEP) == -1:
+        raise SystemExit
+    yaw += gyro.getValues()[2] * DT
+
+
+def set_wheels(left, right):
+    left_motor.setVelocity(left)
+    right_motor.setVelocity(right)
+
+
+def settle():
+    set_wheels(0.0, 0.0)
+    for _ in range(SETTLE_STEPS):
+        step()
+
+
 # Satu step dulu supaya semua sensor punya nilai valid sebelum dipakai.
-robot.step(TIME_STEP)
+step()
 
 
 def log_true_pose():
@@ -86,71 +130,69 @@ def read_sensors():
 
 
 def drive_forward_cells(n=1):
-    """Maju N sel lurus, berhenti berdasarkan rata-rata rotasi roda (bukan
-    waktu/kecepatan tebakan). Encoder = radian kumulatif sejak start."""
+    """Maju N sel lurus. Jarak dari rata-rata rotasi roda (encoder), arah
+    dijaga lewat gyro, kecepatan dihaluskan (ramp naik, melambat mendekati
+    target) supaya roda tidak slip."""
     target = n * CELL / WHEEL_R
     l0, r0 = left_enc.getValue(), right_enc.getValue()
-    left_motor.setVelocity(CRUISE_SPEED)
-    right_motor.setVelocity(CRUISE_SPEED)
-
+    speed = 0.0
     avg = 0.0
-    while robot.step(TIME_STEP) != -1:
-        dl = left_enc.getValue() - l0
-        dr = right_enc.getValue() - r0
-        avg = (dl + dr) / 2.0
-        if avg >= target:
-            break
 
-    left_motor.setVelocity(0.0)
-    right_motor.setVelocity(0.0)
+    while True:
+        avg = ((left_enc.getValue() - l0) + (right_enc.getValue() - r0)) / 2.0
+        remaining = target - avg
+        if remaining <= STOP_TOL:
+            break
+        wanted = min(CRUISE_SPEED, max(MIN_SPEED, DECEL_GAIN * remaining))
+        speed = min(wanted, speed + ACCEL * DT)
+        correction = HEADING_KP * (target_yaw - yaw)  # + = perlu belok kiri
+        set_wheels(speed - correction, speed + correction)
+        step()
+
+    settle()
+    dl = left_enc.getValue() - l0
+    dr = right_enc.getValue() - r0
     log(f"maju {n} sel: target={target:.3f} rad, tercapai={avg:.3f} rad "
-        f"(kiri={dl:.3f}, kanan={dr:.3f})")
+        f"(kiri={dl:.3f}, kanan={dr:.3f}), yaw={math.degrees(yaw):.1f}")
 
 
 def turn(direction):
-    """Belok 90 derajat di tempat. direction: 'left' atau 'right'.
+    """Belok 90 derajat di tempat. direction: 'left' atau 'right'. Berhenti
+    berdasarkan sudut gyro terhadap arah acuan, bukan rotasi roda."""
+    global target_yaw
+    target_yaw += (math.pi / 2) * (1.0 if direction == "left" else -1.0)
 
-    BELUM DIVALIDASI arah putarnya benar atau terbalik -- cek run_log.txt /
-    lihat langsung di Webots, kalau 'right' ternyata belok kiri (atau
-    sebaliknya), tinggal tukar tanda TURN_SPEED di dua baris setVelocity
-    di bawah.
-    """
-    target = TRACK_HALF * (math.pi / 2) / WHEEL_R
-    l0, r0 = left_enc.getValue(), right_enc.getValue()
-
-    sign = 1.0 if direction == "right" else -1.0
-    left_motor.setVelocity(sign * TURN_SPEED)
-    right_motor.setVelocity(-sign * TURN_SPEED)
-
-    avg = 0.0
-    while robot.step(TIME_STEP) != -1:
-        dl = abs(left_enc.getValue() - l0)
-        dr = abs(right_enc.getValue() - r0)
-        avg = (dl + dr) / 2.0
-        if avg >= target:
+    while True:
+        err = target_yaw - yaw  # + = perlu belok kiri
+        if abs(err) <= TURN_TOL:
             break
+        w = min(TURN_SPEED, max(TURN_MIN, TURN_GAIN * abs(err)))
+        w = math.copysign(w, err)
+        set_wheels(-w, w)
+        step()
 
-    left_motor.setVelocity(0.0)
-    right_motor.setVelocity(0.0)
-    log(f"belok {direction}: target={target:.3f} rad, tercapai={avg:.3f} rad")
+    settle()
+    log(f"belok {direction}: yaw={math.degrees(yaw):.1f} "
+        f"(acuan {math.degrees(target_yaw):.1f})")
 
 
-log("=== Uji primitif gerak (bukan solving maze) ===")
-log("Urutan: maju 1 sel -> belok kanan -> maju 1 sel -> belok kiri -> maju 1 sel")
-log("(sudah dicek lewat parser maze -- jalur ini bebas dinding di minimaze.txt)")
-read_sensors()
-drive_forward_cells(1)
-read_sensors()
-turn("right")
-read_sensors()
-drive_forward_cells(1)
-read_sensors()
-turn("left")
-read_sensors()
-drive_forward_cells(1)
-read_sensors()
-log("=== Selesai. Cek log di atas: tercapai harus dekat dengan target. ===")
-log("=== Robot sekarang idle (motor berhenti). ===")
+if __name__ == "__main__":
+    log("=== Uji primitif gerak (bukan solving maze) ===")
+    log("Urutan: maju 1 sel -> belok kanan -> maju 1 sel -> belok kiri -> maju 1 sel")
+    log("(sudah dicek lewat parser maze -- jalur ini bebas dinding di minimaze.txt)")
+    read_sensors()
+    drive_forward_cells(1)
+    read_sensors()
+    turn("right")
+    read_sensors()
+    drive_forward_cells(1)
+    read_sensors()
+    turn("left")
+    read_sensors()
+    drive_forward_cells(1)
+    read_sensors()
+    log("=== Selesai. Bandingkan posisi/arah sebenarnya dengan yang diharapkan. ===")
+    log("=== Robot sekarang idle (motor berhenti). ===")
 
-while robot.step(TIME_STEP) != -1:
-    pass
+    while robot.step(TIME_STEP) != -1:
+        pass

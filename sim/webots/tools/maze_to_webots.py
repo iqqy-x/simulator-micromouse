@@ -70,6 +70,12 @@ BODY_DOME_STRIPS = 7
 BODY_BOTTOM_FLOOR = 0.010
 BODY_TOP_FLOOR = 0.030
 ROBOT_MASS = 0.08      # ASUMSI
+# Pusat massa tepat di atas sumbu roda (sedikit di bawahnya agar stabil).
+# Kalau dibiarkan default (dihitung dari bounding object) pusat massa bergeser
+# ke depan, skid menanggung beban dan gesekannya membuat roda slip saat
+# belok di tempat (hanya berputar 59 dari 90 derajat pada uji).
+ROBOT_COM_Z = -0.004
+MPU6050_PCB_MM = (40.0, 70.75)
 
 SENSOR_HEIGHT = 0.005  # dari lantai -- perkiraan user, belum ditentukan
 
@@ -302,6 +308,15 @@ def body_nodes(visual):
 def generate_robot(cell):
     skid_r = 0.006
     sensors = "\n".join(sensor_node(n, s) for n, s in SENSORS_PCB.items())
+    # MPU6050 di PCB (40, 70.75): gyro sumbu Z dipakai untuk sudut belok dan
+    # menjaga arah lurus. Rentang +-500 deg/s (8.73 rad/s), noise 1%.
+    gx, gy = pcb_to_local(*MPU6050_PCB_MM)
+    sensors += f"""
+    Gyro {{
+      translation {gx:.5f} {gy:.5f} 0
+      name "gyro"
+      lookupTable [ -8.727 -8.727 0.01  8.727 8.727 0.01 ]
+    }}"""
     return f"""Robot {{
   translation {0.5 * cell:.4f} {0.5 * cell:.4f} {WHEEL_R:.4f}
   rotation 0 0 1 1.5707963
@@ -339,6 +354,7 @@ def generate_robot(cell):
   physics Physics {{
     density -1
     mass {ROBOT_MASS}
+    centerOfMass [ 0 0 {ROBOT_COM_Z} ]
   }}
   supervisor TRUE
   controller "micromouse_controller"

@@ -15,7 +15,7 @@ sim/webots/
   micromouse_webots/         project Webots (buka worlds/micromouse.wbt di Webots)
     worlds/
       micromouse.wbt          hasil generate dari maze training/minimaze.txt
-      micromouse_practice8x8.wbt   dari training/practice-8x8-a.txt (untuk Q-learning)
+      micromouse_practice8x8.wbt   dari training/practice-8x8-a.txt
     controllers/
       micromouse_controller/
         micromouse_controller.py   primitif gerak (maju N sel / belok 90 derajat
@@ -34,22 +34,19 @@ sim/webots/
 
 ## Status
 
-- **Fisika dasar (roda, gesekan, bentuk badan): divalidasi jalan.** Bug yang
-  sempat bikin robot tidak bisa belok/kontrol sudah diperbaiki: roda
-  (`Cylinder`) sempat salah orientasi (rotasi tambahan yang tidak perlu
-  membuat sumbu putarnya tidak sejajar dengan `HingeJoint`) -- sudah
-  dihapus.
-- **Primitif gerak (`drive_forward_cells`, `turn`): divalidasi lewat
-  `run_log.txt` dari urutan uji (maju-kanan-maju-kiri-maju).** Semua
-  "maju 1 sel" mencapai 11.259-11.260 rad vs target 11.250 rad (overshoot
-  <0.1%), kedua belokan 3.167 vs target 3.142 rad (<1%) -- presisi encoder
-  bagus. Arah belok (`turn("right")`/`turn("left")`) kemungkinan besar
-  SUDAH BENAR: urutan uji ini satu-satunya kombinasi arah yang bebas
-  tabrakan di maze yang dipakai (sudah dicek lewat parser sebelum run), dan
-  tidak ada satu pun langkah yang undershoot (tanda khas nabrak sesuatu) --
-  jadi arah belok terbalik seharusnya sudah akan ketahuan dari crash/
-  undershoot, tapi ini masih inferensi tidak langsung, bukan konfirmasi
-  visual langsung "robot terlihat belok kanan".
+- **Fisika dasar divalidasi lewat posisi SEBENARNYA (Supervisor), bukan
+  encoder saja.** `Cylinder` di Webots R2025a (ENU) bersumbu Z, jadi roda
+  diputar 90 derajat di sumbu X agar sejajar `HingeJoint` (sebelumnya
+  tergeletak). Pusat massa diset eksplisit di atas sumbu roda
+  (`ROBOT_COM_Z`); kalau dibiarkan default, skid menanggung beban dan roda
+  slip: belok di tempat hanya memutar badan 59 dari 90 derajat padahal
+  encoder sudah "sampai".
+- **Primitif gerak (`drive_forward_cells`, `turn`): jarak dari encoder,
+  sudut dari gyro (MPU6050), arah acuan mutlak.** Hasil uji (posisi
+  sebenarnya): maju 1 sel = 0.180 m; 10 putaran pulang-pergi (maju, belok
+  kiri x2, maju, belok kanan x2 = 40 belokan) berakhir 2 mm dari titik awal
+  dan arah meleset <1 derajat -- tidak menumpuk karena tiap belok
+  menambah +-90 derajat ke arah acuan dan saat maju yaw dikoreksi ke acuan.
 - **Robot kini mengikuti desain PCB** (`hardware/PickAndPlace_MICE_PCB_2026_10_18.xlsx`),
   bukan placeholder lagi: 4 sensor (`ds_fl`, `ds_fr` menghadap depan di x=+-30 mm,
   `ds_dl`, `ds_dr` diagonal 45 derajat dekat tengah), roda 34x7 mm, jarak antar
@@ -110,9 +107,9 @@ Tambahkan `--category halfsize` untuk maze 32x32 (dimensi sel 9 cm).
 - Ganti body/roda placeholder dengan mesh 3D asli (lihat bagian di atas).
 - Kalibrasi ambang dinding dari nilai mentah 4 sensor (`read_sensors()` kini
   hanya mencatat nilai mentah ke `run_log.txt`), lalu tulis fungsi baca dinding
-  yang menggantikan `wallFront()`/`wallLeft()`/`wallRight()` versi mms --
-  setelah ini, planner (flood-fill/A*/Q-table, format sama dengan versi
-  mms) bisa dipakai ulang hampir tanpa perubahan, cuma ganti pemanggilan
-  moveForward/turnLeft/turnRight ke drive_forward_cells/turn di atas.
-- Reset posisi robot antar episode (untuk Q-learning) lewat Supervisor API
-  Webots -- lebih fleksibel daripada tombol Reset manual di `mms`.
+  yang menggantikan `wallFront()`/`wallLeft()`/`wallRight()` versi mms.
+  Webots di sini adalah lingkungan micromouse umum (bukan khusus satu
+  algoritma): planner apa pun cukup memanggil `drive_forward_cells`/`turn`
+  alih-alih moveForward/turnLeft/turnRight.
+- Reset posisi robot ke start lewat Supervisor API (opsional, untuk
+  mengulang uji tanpa membuka ulang dunia).
