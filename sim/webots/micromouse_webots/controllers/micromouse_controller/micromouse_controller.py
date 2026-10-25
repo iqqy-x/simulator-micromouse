@@ -860,21 +860,47 @@ def _rotate_by(delta):
     settle()
 
 
-def _lateral_nudge(shift):
-    """Geser robot ke samping sejauh shift m (+ = kiri) tanpa mengubah arah akhir
-    dan posisi sepanjang sumbu: putar NUDGE_ANGLE menjauhi arah geser, mundur
-    sejauh shift/sin(sudut) (belakang lorong terbuka), putar kembali, maju
-    sejauh komponen sumbunya. Dipakai sebelum putar di tempat di lorong sempit:
-    radius putar PCB ~66 mm di lorong berjari 84 mm hanya menyisakan 18 mm."""
+def _lateral_nudge(shift, forward=False):
+    """Shift sideways without changing final yaw or longitudinal position.
+
+    Use the known incoming passage before a turn, or the verified open exit
+    after a turn. The opposite passage may be closed.
+    """
     psi = -NUDGE_ANGLE if shift > 0 else NUDGE_ANGLE
+    if forward:
+        psi = -psi
     d = abs(shift) / math.sin(NUDGE_ANGLE)
     _rotate_by(psi)
-    _drive(-d)
+    _drive(d if forward else -d)
     settle()
     _rotate_by(-psi)
-    _drive(d * math.cos(NUDGE_ANGLE))
+    _drive((-d if forward else d) * math.cos(NUDGE_ANGLE))
     settle()
-    log(f"geser lateral {shift * 1000:+.0f} mm sebelum putar di tempat")
+    log(f"lateral shift {shift * 1000:+.0f} mm via {'front' if forward else 'rear'} passage")
+
+
+def _verify_search_exit(action, on_blocked, on_verify):
+    """Check each replacement exit so recovery cannot bypass sensor verification."""
+    for _ in range(4):
+        if action == "STOP":
+            return False
+        if action in ("L", "R"):
+            _point_turn("left" if action == "L" else "right")
+        elif action == "U":
+            _point_turn("left")
+            _point_turn("left")
+        elif action != "F":
+            raise ValueError(f"Unknown recovery action: {action}")
+        front_wall, _ = read_front_wall()
+        if on_verify:
+            on_verify(front_wall)
+        if not front_wall:
+            return True
+        log("Exit verification found a wall; choosing another direction")
+        action = on_blocked()
+    if action == "STOP":
+        return False
+    raise StallError("No open exit was verified after four attempts")
 
 
 def search_run(on_cell, on_blocked=None, late_arc_with_front=True, conservative_sides=False,
@@ -924,13 +950,8 @@ def search_run(on_cell, on_blocked=None, late_arc_with_front=True, conservative_
                 settle()
             action = on_blocked()
             log(f"BERHENTI DARURAT: dinding depan mendadak dekat, aksi baru {action}")
-            if action in ("L", "R"):
-                _point_turn("left" if action == "L" else "right")
-            elif action == "U":
-                _point_turn("left")
-                _point_turn("left")
-            else:
-                raise ValueError(f"aksi tidak dikenal setelah henti darurat: {action}")
+            if not _verify_search_exit(action, on_blocked, on_verify):
+                return cells
             to_center = CELL
             v_in = 0.0
             prev_before = None
@@ -972,34 +993,23 @@ def search_run(on_cell, on_blocked=None, late_arc_with_front=True, conservative_
         e_est = obs.get("e_est")
         if e_est is not None and NUDGE_MIN < abs(e_est) <= NUDGE_MAX:
             _lateral_nudge(-e_est)
+        yaw_before_turn = target_yaw
         if action in ("L", "R"):
             _point_turn("left" if action == "L" else "right")
-            if stop_back > 0.005:
-                # berhenti stop_back lebih awal sepanjang arah LAMA: setelah diputar
-                # selisih itu jadi galat lateral (kiri bila belok kiri); geser kembali
-                # supaya jalur berikutnya tidak lewat dekat dinding.
-                _lateral_nudge(-stop_back if action == "L" else stop_back)
             if side_unknown and on_blocked:
-                # Sisi tujuan ambigu: lihat dinding depan (arah baru) dari tengah sel
-                # dengan FL/FR yang andal. Kalau dinding, laporkan dan pilih aksi lain.
-                front_wall, _ = read_front_wall()
-                if on_verify:
-                    on_verify(front_wall)
-                if front_wall:
-                    log("VERIFIKASI: sisi ambigu ternyata dinding, aksi dipilih ulang")
-                    action2 = on_blocked()
-                    if action2 in ("L", "R"):
-                        _point_turn("left" if action2 == "L" else "right")
-                    elif action2 == "U":
-                        _point_turn("left")
-                        _point_turn("left")
-            to_center = CELL
+                if not _verify_search_exit("F", on_blocked, on_verify):
+                    return cells
         elif action == "U":
             _point_turn("left")
             _point_turn("left")
-            to_center = CELL - stop_back   # sesudah putar balik robot stop_back di DEPAN tengah sel
         else:
             raise ValueError(f"aksi tidak dikenal: {action}")
+        turn_angle = target_yaw - yaw_before_turn
+        lateral_shift = -stop_back * math.sin(turn_angle)
+        if abs(lateral_shift) > 0.005:
+            # The chosen exit is open; the passage behind the new heading may be closed.
+            _lateral_nudge(lateral_shift, forward=True)
+        to_center = CELL + stop_back * math.cos(turn_angle)
         v_in = 0.0
 
 

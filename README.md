@@ -12,6 +12,8 @@ sim/
     flood-fill-c/   Working flood fill algorithm (C) — BFS distance map,
                      shortest-path visualization, adapts to any maze size
     mms-cpp/        Unmodified C++ template, kept for reference
+  webots/           Continuous physics simulation, including a rule-based
+                     exploration scenario for the robotics assignment
   mms-app/          Prebuilt mms simulator (Windows)
   mms-src/          mms simulator source, for reference
   mazes/mazefiles/  522 real competition mazes (All Japan, APEC, AAMC, ...),
@@ -43,3 +45,12 @@ maze, 2 for one even dimension, 1 for odd x odd).
 
 `floodFill()` in `solver.c` is where the move-selection logic lives, if you
 want to tune or replace it.
+
+## Continuous rule-based simulation
+
+Open `sim/webots/micromouse_webots/worlds/micromouse_rule_based.wbt` in
+Webots R2025a and run it. The robot explores using sensor rules, visit
+memory, and backtracking over continuous wheel control.
+
+See [the assignment specification](sim/webots/RULE_BASED.md) for the state
+space, actions, initial state, goal, rules, execution steps, and validation.

@@ -30,6 +30,7 @@ dan lebar roda (N20 wheel 34x7), jarak antar roda, kecepatan motor (N20
 sensor dari lantai, dan kurva respons sensor (SENSOR_* di bawah).
 """
 
+import json
 import math
 import sys
 from pathlib import Path
@@ -427,7 +428,11 @@ def body_visual():
     }}"""
 
 
-def generate_robot(cell, controller="micromouse_controller"):
+def generate_robot(cell, controller="micromouse_controller", maze_size=None):
+    metadata = ""
+    if maze_size is not None:
+        data = json.dumps({"maze_width": maze_size[0], "maze_height": maze_size[1], "cell_size": cell})
+        metadata = f"  customData {json.dumps(data)}\n"
     skid_r = 0.003
     sensors = "\n".join(sensor_node(n, s) for n, s in SENSORS_PCB.items())
     # MPU6050 di PCB (40, 70.75): gyro sumbu Z dipakai untuk sudut belok dan
@@ -475,7 +480,7 @@ def generate_robot(cell, controller="micromouse_controller"):
     centerOfMass [ {ROBOT_COM_X} 0 {ROBOT_COM_Z} ]
   }}
   supervisor TRUE
-  controller "{controller}"
+{metadata}  controller "{controller}"
 }}"""
 
 
@@ -500,7 +505,7 @@ def main():
     controller = "micromouse_controller"
     if "--controller" in sys.argv:
         controller = sys.argv[sys.argv.index("--controller") + 1]
-    robot = generate_robot(cell, controller)
+    robot = generate_robot(cell, controller, maze_size=(width, rows))
 
     floor_w, floor_h = width * cell, rows * cell
 

@@ -20,6 +20,7 @@ sim/webots/
                                    wall_test (uji pembacaan dinding)
       micromouse_floodfill.wbt     practice-8x8-a; controller floodfill
       micromouse_qlearning.wbt     practice-8x8-a; controller qlearning
+      micromouse_rule_based.wbt    practice-8x8-a; controller rule_based
     meshes/                    model 3D Tinkercad + potongan per warna (parts/)
     controllers/
       micromouse_controller/
@@ -33,6 +34,9 @@ sim/webots/
         floodfill.py               flood fill: jelajah dengan sensor + lari cepat
       qlearning/
         qlearning.py               Q-learning tabular di atas search_run + lari cepat
+      rule_based/
+        navigation.py              aturan eksplorasi, ingatan kunjungan, backtracking
+        rule_based.py              adapter sensor dan gerak kontinu Webots
 ```
 
 ## Cara membuka
@@ -45,6 +49,15 @@ sim/webots/
    sensor di tiap titik.
 
 ## Status
+
+- **Skenario tugas rule based** tersedia di `micromouse_rule_based.wbt`.
+  Definisi state space, aksi, S0, goal, aturan, cara menjalankan, serta batas
+  validasinya ada di [RULE_BASED.md](RULE_BASED.md). Aturan menggunakan
+  ingatan kunjungan dan backtracking, dengan kontrol roda kontinu.
+- Verifikasi exit pada `search_run` kini memeriksa juga arah pengganti
+  setelah pilihan sebelumnya tertutup. Koreksi lateral sesudah belok
+  menggunakan lorong keluar yang terbuka agar tidak mundur ke sisi
+  berdinding. Parameter `forward=True` pada `_lateral_nudge` memilih cara ini.
 
 - **Fisika dasar divalidasi lewat posisi SEBENARNYA (Supervisor), bukan
   encoder saja.** `Cylinder` di Webots R2025a (ENU) bersumbu Z, jadi roda
